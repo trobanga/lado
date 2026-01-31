@@ -1,4 +1,4 @@
-use crate::git::FileChange;
+use crate::git::FlatFileEntry;
 use crate::FileEntry;
 
 /// Model for a file entry in the UI
@@ -11,22 +11,15 @@ pub struct FileEntryModel {
     pub status: String,
 }
 
-impl From<&FileChange> for FileEntryModel {
-    fn from(file: &FileChange) -> Self {
-        let name = file
-            .path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&file.path)
-            .to_string();
-
+impl From<&FlatFileEntry> for FileEntryModel {
+    fn from(entry: &FlatFileEntry) -> Self {
         Self {
-            name,
-            path: file.path.clone(),
-            depth: 0,
-            is_folder: false,
-            is_expanded: true,
-            status: file.status.as_str().to_string(),
+            name: entry.name.clone(),
+            path: entry.path.clone(),
+            depth: entry.depth,
+            is_folder: entry.is_folder,
+            is_expanded: entry.is_expanded,
+            status: entry.status.clone(),
         }
     }
 }

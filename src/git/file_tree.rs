@@ -1,7 +1,5 @@
 //! File tree construction from diff data.
-//! This module will be used to build hierarchical file trees for the UI.
-
-#![allow(dead_code)]
+//! Builds hierarchical file trees for the UI.
 
 use super::diff::FileChange;
 use std::collections::HashMap;

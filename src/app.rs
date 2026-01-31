@@ -1,5 +1,5 @@
 use crate::cli::{Args, DiffTarget};
-use crate::git::{DiffData, Repository};
+use crate::git::{build_file_tree, flatten_tree, DiffData, Repository};
 use crate::github;
 use crate::models::{DiffLineModel, FileEntryModel};
 use crate::{DiffLine, FileEntry, MainWindow};
@@ -102,9 +102,12 @@ impl App {
         // Compute the diff
         let diff_data = self.repo.diff_commits(base_oid, head_oid)?;
 
+        // Build hierarchical file tree and flatten for UI
+        let tree = build_file_tree(&diff_data.files);
+        let flat_entries = flatten_tree(&tree, 0);
+
         // Convert to UI models
-        let file_entries: Vec<FileEntry> = diff_data
-            .files
+        let file_entries: Vec<FileEntry> = flat_entries
             .iter()
             .map(|f| FileEntryModel::from(f).into())
             .collect();
@@ -112,8 +115,8 @@ impl App {
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
 
-        // If there are files, select the first one and load its diff
-        if let Some(first_file) = diff_data.files.first() {
+        // If there are files, select the first file (not folder) and load its diff
+        if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
             self.window.set_selected_file(first_file.path.clone().into());
             let lines = get_lines_for_file(&diff_data, &first_file.path);
             self.window.set_lines(lines);
