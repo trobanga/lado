@@ -1,8 +1,8 @@
 use crate::cli::{Args, DiffTarget};
 use crate::git::{build_file_tree, flatten_tree, DiffData, Repository};
-use crate::github::{self, FileComments};
-use crate::models::{DiffLineModel, FileEntryModel};
-use crate::{DiffLine, FileEntry, MainWindow};
+use crate::github::{self, FileComments, PrCommit};
+use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel};
+use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
@@ -10,16 +10,20 @@ use std::rc::Rc;
 
 pub struct App {
     window: MainWindow,
-    repo: Repository,
+    repo: Rc<Repository>,
     target: DiffTarget,
     diff_data: Rc<RefCell<Option<DiffData>>>,
     pr_comments: Rc<RefCell<Option<FileComments>>>,
+    pr_commits: Rc<RefCell<Vec<PrCommit>>>,
+    all_pr_comments: Rc<RefCell<Vec<github::PrComment>>>,
+    pr_base_ref: Rc<RefCell<Option<String>>>,
+    pr_head_ref: Rc<RefCell<Option<String>>>,
 }
 
 impl App {
     pub fn new(args: Args) -> Result<Self> {
         let window = MainWindow::new().context("Failed to create window")?;
-        let repo = Repository::open_current_dir()?;
+        let repo = Rc::new(Repository::open_current_dir()?);
         let target = DiffTarget::parse(args.target.as_deref());
 
         // Set the diff title based on target
@@ -39,6 +43,10 @@ impl App {
             target,
             diff_data: Rc::new(RefCell::new(None)),
             pr_comments: Rc::new(RefCell::new(None)),
+            pr_commits: Rc::new(RefCell::new(Vec::new())),
+            all_pr_comments: Rc::new(RefCell::new(Vec::new())),
+            pr_base_ref: Rc::new(RefCell::new(None)),
+            pr_head_ref: Rc::new(RefCell::new(None)),
         };
 
         app.setup_callbacks()?;
@@ -78,6 +86,102 @@ impl App {
             println!("Refresh diff");
         });
 
+        // Commit selection callback for PR commit navigation
+        let window_weak = self.window.as_weak();
+        let repo = Rc::clone(&self.repo);
+        let pr_commits = Rc::clone(&self.pr_commits);
+        let pr_base_ref = Rc::clone(&self.pr_base_ref);
+        let pr_head_ref = Rc::clone(&self.pr_head_ref);
+        let all_pr_comments = Rc::clone(&self.all_pr_comments);
+        self.window.on_commit_selected(move |idx| {
+            let window = window_weak.unwrap();
+            let commits = pr_commits.borrow();
+            let comments = all_pr_comments.borrow();
+
+            let diff_result: Option<(Result<DiffData>, Option<FileComments>)> = if idx < 0 {
+                // "All changes" - diff base to head
+                let base_ref = pr_base_ref.borrow();
+                let head_ref = pr_head_ref.borrow();
+                if let (Some(base), Some(head)) = (base_ref.as_ref(), head_ref.as_ref()) {
+                    let base_oid = repo.resolve_ref(base).ok();
+                    let head_oid = repo.resolve_ref(head).ok();
+                    if let (Some(b), Some(h)) = (base_oid, head_oid) {
+                        // Show all comments for full diff
+                        let grouped = github::group_comments_by_file(comments.clone());
+                        Some((repo.diff_commits(b, h), Some(grouped)))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else if let Some(commit) = commits.get(idx as usize) {
+                // Single commit - diff parent to this commit
+                if let Some(ref parent_sha) = commit.parent_sha {
+                    let parent_oid = repo.resolve_ref(parent_sha).ok();
+                    let commit_oid = repo.resolve_ref(&commit.sha).ok();
+                    if let (Some(p), Some(c)) = (parent_oid, commit_oid) {
+                        // Filter comments to only show those on this commit
+                        let filtered: Vec<_> = comments
+                            .iter()
+                            .filter(|c| c.original_commit_id == commit.sha)
+                            .cloned()
+                            .collect();
+                        let grouped = github::group_comments_by_file(filtered);
+                        Some((repo.diff_commits(p, c), Some(grouped)))
+                    } else {
+                        None
+                    }
+                } else {
+                    // First commit in PR - no parent, show empty diff or handle differently
+                    // For now, just show the commit itself compared to base
+                    let base_ref = pr_base_ref.borrow();
+                    if let Some(base) = base_ref.as_ref() {
+                        let base_oid = repo.resolve_ref(base).ok();
+                        let commit_oid = repo.resolve_ref(&commit.sha).ok();
+                        if let (Some(b), Some(c)) = (base_oid, commit_oid) {
+                            let filtered: Vec<_> = comments
+                                .iter()
+                                .filter(|c| c.original_commit_id == commit.sha)
+                                .cloned()
+                                .collect();
+                            let grouped = github::group_comments_by_file(filtered);
+                            Some((repo.diff_commits(b, c), Some(grouped)))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Some((Ok(diff_data), grouped_comments)) = diff_result {
+                // Build hierarchical file tree and flatten for UI
+                let tree = build_file_tree(&diff_data.files);
+                let flat_entries = flatten_tree(&tree, 0);
+
+                // Convert to UI models
+                let file_entries: Vec<FileEntry> = flat_entries
+                    .iter()
+                    .map(|f| FileEntryModel::from(f).into())
+                    .collect();
+
+                let files_model = Rc::new(VecModel::from(file_entries));
+                window.set_files(ModelRc::from(files_model));
+
+                // If there are files, select the first file (not folder) and load its diff
+                if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
+                    window.set_selected_file(first_file.path.clone().into());
+                    let lines =
+                        get_lines_for_file(&diff_data, &first_file.path, grouped_comments.as_ref());
+                    window.set_lines(lines);
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -100,11 +204,33 @@ impl App {
                 let base = self.repo.resolve_ref(&base_ref)?;
                 let head = self.repo.resolve_ref(&head_ref)?;
 
+                // Store refs for later commit navigation
+                *self.pr_base_ref.borrow_mut() = Some(base_ref);
+                *self.pr_head_ref.borrow_mut() = Some(head_ref);
+
+                // Fetch PR commits
+                match github::get_pr_commits(*pr_num) {
+                    Ok(commits) => {
+                        // Convert to UI model
+                        let commit_entries: Vec<PrCommitEntry> = commits
+                            .iter()
+                            .map(|c| PrCommitModel::from(c).into())
+                            .collect();
+                        let commits_model = Rc::new(VecModel::from(commit_entries));
+                        self.window.set_commits(ModelRc::from(commits_model));
+                        *self.pr_commits.borrow_mut() = commits;
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not fetch PR commits: {}", e);
+                    }
+                }
+
                 // Fetch PR comments
                 match github::get_pr_comments(*pr_num) {
                     Ok(comments) => {
-                        let grouped = github::group_comments_by_file(comments);
+                        let grouped = github::group_comments_by_file(comments.clone());
                         *self.pr_comments.borrow_mut() = Some(grouped);
+                        *self.all_pr_comments.borrow_mut() = comments;
                     }
                     Err(e) => {
                         eprintln!("Warning: Could not fetch PR comments: {}", e);
