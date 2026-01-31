@@ -1,3 +1,8 @@
+//! Syntax highlighting for diff content.
+//! This module will be integrated with the diff view for code coloring.
+
+#![allow(dead_code)]
+
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;

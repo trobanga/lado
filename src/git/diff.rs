@@ -49,6 +49,7 @@ pub struct DiffLine {
 
 /// A hunk in a diff
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DiffHunk {
     pub header: String,
     pub old_start: u32,

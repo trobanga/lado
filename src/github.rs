@@ -3,6 +3,7 @@ use std::process::Command;
 
 /// Represents PR branch information
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct PrInfo {
     pub base_ref: String,
     pub head_ref: String,
