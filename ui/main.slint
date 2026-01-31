@@ -1,11 +1,12 @@
 import { Theme } from "theme.slint";
-import { FileEntry, DiffLine } from "structs.slint";
+import { FileEntry, DiffLine, PrCommitEntry } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
+import { CommitList } from "components/commit_list.slint";
 
 // Re-export structs for Rust access
-export { FileEntry, DiffLine }
+export { FileEntry, DiffLine, PrCommitEntry }
 
 export component MainWindow inherits Window {
     title: "lado";
@@ -20,11 +21,14 @@ export component MainWindow inherits Window {
     in-out property <string> diff-title: "No diff loaded";
     in-out property <[FileEntry]> files: [];
     in-out property <[DiffLine]> lines: [];
+    in-out property <[PrCommitEntry]> commits: [];
+    in-out property <int> selected-commit-index: -1;
 
     // Callbacks for Rust integration
     callback file-selected(string);
     callback toggle-view-mode();
     callback refresh-diff();
+    callback commit-selected(int);
 
     VerticalLayout {
         // Toolbar
@@ -53,12 +57,25 @@ export component MainWindow inherits Window {
                     background: Theme.border-subtle;
                 }
 
-                FileTree {
-                    selected-file: root.selected-file;
-                    files: root.files;
-                    file-clicked(path) => {
-                        root.selected-file = path;
-                        root.file-selected(path);
+                VerticalLayout {
+                    // Commit list (collapsible, above file tree)
+                    CommitList {
+                        commits: root.commits;
+                        selected-index: root.selected-commit-index;
+                        commit-selected(idx) => {
+                            root.selected-commit-index = idx;
+                            root.commit-selected(idx);
+                        }
+                    }
+
+                    // File tree
+                    FileTree {
+                        selected-file: root.selected-file;
+                        files: root.files;
+                        file-clicked(path) => {
+                            root.selected-file = path;
+                            root.file-selected(path);
+                        }
                     }
                 }
             }
