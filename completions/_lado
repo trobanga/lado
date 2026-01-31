@@ -1,0 +1,46 @@
+#compdef lado
+
+# Zsh completion script for lado - Git diff viewer
+
+_lado_branches() {
+    local branches
+    branches=(${(f)"$(git branch --format='%(refname:short)' 2>/dev/null)"})
+    _describe 'branch' branches
+}
+
+_lado_remote_branches() {
+    local branches
+    branches=(${(f)"$(git branch -r --format='%(refname:short)' 2>/dev/null | sed 's/origin\///')"})
+    _describe 'remote branch' branches
+}
+
+_lado_prs() {
+    local prs
+    if command -v gh &>/dev/null; then
+        prs=(${(f)"$(gh pr list --limit 20 --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null)"})
+        _describe 'pull request' prs
+    fi
+}
+
+_lado() {
+    local -a args
+    args=(
+        '--completions[Generate shell completions]:shell:(bash zsh fish powershell elvish)'
+        '--help[Show help information]'
+        '--version[Show version information]'
+        '1:target:->target'
+    )
+
+    _arguments -s $args
+
+    case "$state" in
+        target)
+            _alternative \
+                'branches:branch:_lado_branches' \
+                'remote-branches:remote branch:_lado_remote_branches' \
+                'prs:pull request:_lado_prs'
+            ;;
+    esac
+}
+
+_lado "$@"
