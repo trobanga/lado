@@ -8,6 +8,14 @@ export struct FileEntry {
     status: string,
 }
 
+export struct PrCommitEntry {
+    sha: string,
+    short-sha: string,
+    summary: string,
+    author: string,
+    is-selected: bool,
+}
+
 export struct DiffLine {
     line-type: string,      // "add", "remove", "context", "hunk", "comment"
     old-line-num: string,
