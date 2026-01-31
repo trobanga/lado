@@ -20,6 +20,7 @@ pub enum CommentSide {
 
 /// A single PR review comment
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PrComment {
     pub id: u64,
     pub in_reply_to_id: Option<u64>,
@@ -29,6 +30,18 @@ pub struct PrComment {
     pub body: String,
     pub author: String,
     pub created_at: String,
+    pub commit_id: String,
+    pub original_commit_id: String,
+}
+
+/// A single commit in a PR
+#[derive(Debug, Clone)]
+pub struct PrCommit {
+    pub sha: String,
+    pub short_sha: String,
+    pub parent_sha: Option<String>,
+    pub message: String,
+    pub author: String,
 }
 
 /// Comments grouped by file path, then by line number
@@ -118,6 +131,12 @@ pub fn get_pr_comments(pr_number: u32) -> Result<Vec<PrComment>> {
         let author = comment["user"]["login"].as_str().unwrap_or("").to_string();
         let created_at = comment["created_at"].as_str().unwrap_or("").to_string();
 
+        let commit_id = comment["commit_id"].as_str().unwrap_or("").to_string();
+        let original_commit_id = comment["original_commit_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
         comments.push(PrComment {
             id,
             in_reply_to_id,
@@ -127,10 +146,63 @@ pub fn get_pr_comments(pr_number: u32) -> Result<Vec<PrComment>> {
             body,
             author,
             created_at,
+            commit_id,
+            original_commit_id,
         });
     }
 
     Ok(comments)
+}
+
+/// Fetch commits for a PR using the gh CLI
+pub fn get_pr_commits(pr_number: u32) -> Result<Vec<PrCommit>> {
+    let output = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{{owner}}/{{repo}}/pulls/{}/commits", pr_number),
+            "--paginate",
+        ])
+        .output()
+        .context("Failed to execute gh CLI. Is it installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("gh api failed: {}", stderr));
+    }
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("Failed to parse gh output")?;
+
+    let commits_array = json.as_array().ok_or_else(|| anyhow!("Expected array"))?;
+
+    let mut commits = Vec::new();
+    for commit in commits_array {
+        let sha = commit["sha"].as_str().unwrap_or("").to_string();
+        let short_sha = sha.chars().take(7).collect();
+        let message = commit["commit"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let author = commit["commit"]["author"]["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let parent_sha = commit["parents"]
+            .as_array()
+            .and_then(|parents| parents.first())
+            .and_then(|p| p["sha"].as_str())
+            .map(|s| s.to_string());
+
+        commits.push(PrCommit {
+            sha,
+            short_sha,
+            parent_sha,
+            message,
+            author,
+        });
+    }
+
+    Ok(commits)
 }
 
 /// Group comments by file path
