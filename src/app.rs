@@ -1,16 +1,18 @@
 use crate::cli::{Args, DiffTarget};
-use crate::git::Repository;
+use crate::git::{DiffData, Repository};
 use crate::github;
 use crate::models::{DiffLineModel, FileEntryModel};
-use crate::{FileEntry, MainWindow};
+use crate::{DiffLine, FileEntry, MainWindow};
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct App {
     window: MainWindow,
     repo: Repository,
     target: DiffTarget,
+    diff_data: Rc<RefCell<Option<DiffData>>>,
 }
 
 impl App {
@@ -34,6 +36,7 @@ impl App {
             window,
             repo,
             target,
+            diff_data: Rc::new(RefCell::new(None)),
         };
 
         app.setup_callbacks()?;
@@ -44,12 +47,18 @@ impl App {
 
     fn setup_callbacks(&self) -> Result<()> {
         let window_weak = self.window.as_weak();
+        let diff_data = Rc::clone(&self.diff_data);
 
         // File selection callback
         self.window.on_file_selected(move |path| {
             let window = window_weak.unwrap();
-            // TODO: Load diff for selected file
-            println!("Selected file: {}", path);
+            let path_str = path.to_string();
+
+            if let Some(ref data) = *diff_data.borrow() {
+                let lines = get_lines_for_file(data, &path_str);
+                window.set_lines(lines);
+            }
+
             window.set_selected_file(path);
         });
 
@@ -103,21 +112,15 @@ impl App {
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
 
-        // If there are files, select the first one
+        // If there are files, select the first one and load its diff
         if let Some(first_file) = diff_data.files.first() {
             self.window.set_selected_file(first_file.path.clone().into());
-
-            // Load diff lines for first file
-            if let Some(hunks) = diff_data.file_hunks.get(&first_file.path) {
-                let lines: Vec<_> = hunks
-                    .iter()
-                    .flat_map(|h| h.lines.iter())
-                    .map(|l| DiffLineModel::from(l).into())
-                    .collect();
-                let lines_model = Rc::new(VecModel::from(lines));
-                self.window.set_lines(ModelRc::from(lines_model));
-            }
+            let lines = get_lines_for_file(&diff_data, &first_file.path);
+            self.window.set_lines(lines);
         }
+
+        // Store for later use in callbacks
+        *self.diff_data.borrow_mut() = Some(diff_data);
 
         Ok(())
     }
@@ -126,4 +129,27 @@ impl App {
         self.window.run().context("Failed to run window")?;
         Ok(())
     }
+}
+
+/// Convert hunks for a file into Slint-compatible DiffLine model
+fn get_lines_for_file(data: &DiffData, path: &str) -> ModelRc<DiffLine> {
+    use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+
+    let hunks = data.file_hunks.get(path).cloned().unwrap_or_default();
+    let lines: Vec<DiffLine> = hunks
+        .into_iter()
+        .flat_map(|hunk| {
+            // Create hunk header line (trim trailing newline from git2)
+            let header_line = GitDiffLine {
+                line_type: DiffLineType::Hunk,
+                old_line_num: None,
+                new_line_num: None,
+                content: hunk.header.trim_end().to_string(),
+            };
+            // Prepend header to hunk lines
+            std::iter::once(header_line).chain(hunk.lines)
+        })
+        .map(|l| DiffLineModel::from(&l).into())
+        .collect();
+    ModelRc::new(VecModel::from(lines))
 }

@@ -60,16 +60,16 @@ component UnifiedLine inherits Rectangle {
 
             Text {
                 text: line.line-type == "add" ? "+" :
-                      line.line-type == "remove" ? "-" :
-                      line.line-type == "hunk" ? "@@" : " ";
+                      line.line-type == "remove" ? "-" : " ";
                 color: line.line-type == "add" ? Theme.diff-add-text :
                        line.line-type == "remove" ? Theme.diff-remove-text :
                        line.line-type == "hunk" ? Theme.diff-hunk-text :
                        Theme.text-muted;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                height: 100%;
             }
         }
 
@@ -83,6 +83,7 @@ component UnifiedLine inherits Rectangle {
                        Theme.text-primary;
                 font-size: 13px;
                 vertical-alignment: center;
+                height: 100%;
                 x: 8px;
             }
         }
@@ -95,8 +96,11 @@ export component UnifiedView inherits Rectangle {
     background: Theme.bg-primary;
 
     Flickable {
+        width: 100%;
+        height: 100%;
         viewport-height: lines.length * 22px;
         viewport-width: max(self.width, 2000px);
+        viewport-y: 0;
 
         VerticalLayout {
             for line in lines: UnifiedLine {
