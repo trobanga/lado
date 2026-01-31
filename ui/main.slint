@@ -1,0 +1,74 @@
+import { Theme } from "theme.slint";
+import { FileEntry, DiffLine } from "structs.slint";
+import { FileTree } from "components/file_tree.slint";
+import { DiffView } from "components/diff_view.slint";
+import { Toolbar } from "components/toolbar.slint";
+
+// Re-export structs for Rust access
+export { FileEntry, DiffLine }
+
+export component MainWindow inherits Window {
+    title: "lado";
+    background: Theme.bg-primary;
+    min-width: 1200px;
+    min-height: 700px;
+    default-font-family: "IBM Plex Sans";
+    default-font-size: 13px;
+
+    in-out property <bool> side-by-side-mode: false;
+    in-out property <string> selected-file: "";
+    in-out property <string> diff-title: "No diff loaded";
+    in-out property <[FileEntry]> files: [];
+    in-out property <[DiffLine]> lines: [];
+
+    // Callbacks for Rust integration
+    callback file-selected(string);
+    callback toggle-view-mode();
+    callback refresh-diff();
+
+    VerticalLayout {
+        // Toolbar
+        Toolbar {
+            side-by-side: root.side-by-side-mode;
+            diff-title: root.diff-title;
+            toggle-view => {
+                root.side-by-side-mode = !root.side-by-side-mode;
+                root.toggle-view-mode();
+            }
+            refresh => {
+                root.refresh-diff();
+            }
+        }
+
+        // Main content area
+        HorizontalLayout {
+            // File tree panel
+            Rectangle {
+                width: 280px;
+                background: Theme.bg-secondary;
+
+                Rectangle {
+                    x: parent.width - 1px;
+                    width: 1px;
+                    background: Theme.border-subtle;
+                }
+
+                FileTree {
+                    selected-file: root.selected-file;
+                    files: root.files;
+                    file-clicked(path) => {
+                        root.selected-file = path;
+                        root.file-selected(path);
+                    }
+                }
+            }
+
+            // Diff view area
+            DiffView {
+                side-by-side: root.side-by-side-mode;
+                selected-file: root.selected-file;
+                lines: root.lines;
+            }
+        }
+    }
+}

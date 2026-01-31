@@ -1,0 +1,16 @@
+// Shared data structures
+export struct FileEntry {
+    name: string,
+    path: string,
+    depth: int,
+    is-folder: bool,
+    is-expanded: bool,
+    status: string,
+}
+
+export struct DiffLine {
+    line-type: string,      // "add", "remove", "context", "hunk"
+    old-line-num: string,
+    new-line-num: string,
+    content: string,
+}

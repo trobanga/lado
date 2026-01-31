@@ -1,0 +1,143 @@
+import { Theme } from "../theme.slint";
+import { FileEntry } from "../structs.slint";
+
+// File status indicator
+component StatusBadge inherits Rectangle {
+    in property <string> status; // "added", "modified", "deleted"
+
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: status == "added" ? Theme.status-added :
+                status == "deleted" ? Theme.status-deleted :
+                Theme.status-modified;
+}
+
+// Individual file/folder item
+component TreeItem inherits Rectangle {
+    in property <string> name;
+    in property <string> path;
+    in property <int> depth;
+    in property <bool> is-folder;
+    in property <bool> is-expanded: true;
+    in property <string> status: "modified";
+    in property <bool> selected: false;
+
+    callback clicked;
+    callback toggle-expand;
+
+    height: 28px;
+    background: selected ? Theme.bg-selected :
+                (touch.has-hover ? Theme.bg-hover : transparent);
+
+    HorizontalLayout {
+        padding-left: 12px + (depth * 16px);
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        // Expand/collapse indicator for folders
+        if is-folder: Rectangle {
+            width: 16px;
+            height: 16px;
+
+            Text {
+                text: is-expanded ? "v" : ">";
+                color: Theme.text-muted;
+                font-size: 10px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggle-expand(); }
+            }
+        }
+
+        // File/folder icon placeholder
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            background: is-folder ? Theme.accent-secondary : transparent;
+            border-radius: 2px;
+            opacity: 0.3;
+        }
+
+        // Name
+        Text {
+            text: name;
+            color: selected ? Theme.text-primary : Theme.text-secondary;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Rectangle { }
+
+        // Status badge for files
+        if !is-folder: StatusBadge {
+            status: root.status;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component FileTree inherits Rectangle {
+    in-out property <string> selected-file;
+    in property <[FileEntry]> files: [];
+
+    callback file-clicked(string);
+
+    background: transparent;
+
+    VerticalLayout {
+        padding-top: 8px;
+
+        // Header
+        Rectangle {
+            height: 40px;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: start;
+
+                Text {
+                    text: "Changed Files";
+                    color: Theme.text-primary;
+                    font-size: 13px;
+                    font-weight: 500;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // File list
+        Flickable {
+            viewport-height: files.length * 28px;
+
+            VerticalLayout {
+                for file in files: TreeItem {
+                    name: file.name;
+                    path: file.path;
+                    depth: file.depth;
+                    is-folder: file.is-folder;
+                    is-expanded: file.is-expanded;
+                    status: file.status;
+                    selected: file.path == selected-file;
+
+                    clicked => {
+                        if (!file.is-folder) {
+                            root.file-clicked(file.path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

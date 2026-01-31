@@ -1,0 +1,153 @@
+import { Theme } from "../theme.slint";
+
+component ToolbarButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+
+    callback clicked;
+
+    width: self.height * 2.5;
+    height: 28px;
+    border-radius: 4px;
+    background: touch.has-hover ? Theme.bg-hover : (active ? Theme.bg-tertiary : transparent);
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+        alignment: center;
+
+        Text {
+            text: label;
+            color: active ? Theme.text-primary : Theme.text-secondary;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component ViewToggle inherits Rectangle {
+    in property <bool> side-by-side;
+    callback toggle;
+
+    height: 28px;
+    width: 160px;
+    background: Theme.bg-tertiary;
+    border-radius: 4px;
+
+    HorizontalLayout {
+        padding: 2px;
+
+        Rectangle {
+            background: !side-by-side ? Theme.bg-hover : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: "Unified";
+                color: !side-by-side ? Theme.text-primary : Theme.text-muted;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (side-by-side) { root.toggle(); }
+                }
+            }
+        }
+
+        Rectangle {
+            background: side-by-side ? Theme.bg-hover : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: "Side by Side";
+                color: side-by-side ? Theme.text-primary : Theme.text-muted;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (!side-by-side) { root.toggle(); }
+                }
+            }
+        }
+    }
+}
+
+export component Toolbar inherits Rectangle {
+    in property <bool> side-by-side;
+    in property <string> diff-title;
+
+    callback toggle-view;
+    callback refresh;
+
+    height: 48px;
+    background: Theme.bg-secondary;
+
+    // Bottom border
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-subtle;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: space-between;
+
+        // Left section - title
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            Text {
+                text: "lado";
+                color: Theme.accent-primary;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 1px;
+                height: 20px;
+                background: Theme.border-normal;
+            }
+
+            Text {
+                text: diff-title;
+                color: Theme.text-secondary;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Right section - controls
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: end;
+
+            ViewToggle {
+                side-by-side: root.side-by-side;
+                toggle => { root.toggle-view(); }
+            }
+
+            ToolbarButton {
+                label: "Refresh";
+                clicked => { root.refresh(); }
+            }
+        }
+    }
+}

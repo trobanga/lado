@@ -1,0 +1,34 @@
+import { Theme } from "../theme.slint";
+import { DiffLine } from "../structs.slint";
+import { UnifiedView } from "unified.slint";
+import { SideBySideView } from "side_by_side.slint";
+
+export component DiffView inherits Rectangle {
+    in property <bool> side-by-side;
+    in property <string> selected-file;
+    in property <[DiffLine]> lines: [];
+
+    background: Theme.bg-primary;
+
+    if selected-file == "": Rectangle {
+        // Empty state
+        VerticalLayout {
+            alignment: center;
+
+            Text {
+                text: "Select a file to view diff";
+                color: Theme.text-muted;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    if selected-file != "" && !side-by-side: UnifiedView {
+        lines: root.lines;
+    }
+
+    if selected-file != "" && side-by-side: SideBySideView {
+        lines: root.lines;
+    }
+}

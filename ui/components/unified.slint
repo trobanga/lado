@@ -1,0 +1,107 @@
+import { Theme } from "../theme.slint";
+import { DiffLine } from "../structs.slint";
+
+component UnifiedLine inherits Rectangle {
+    in property <DiffLine> line;
+
+    height: 22px;
+    background: line.line-type == "add" ? Theme.diff-add-bg :
+                line.line-type == "remove" ? Theme.diff-remove-bg :
+                line.line-type == "hunk" ? Theme.diff-hunk-bg :
+                Theme.diff-context-bg;
+
+    HorizontalLayout {
+        // Gutter - old line number
+        Rectangle {
+            width: 50px;
+            background: line.line-type == "add" ? Theme.diff-add-gutter :
+                        line.line-type == "remove" ? Theme.diff-remove-gutter :
+                        Theme.bg-secondary;
+
+            Text {
+                text: line.old-line-num;
+                color: Theme.text-muted;
+                font-size: 12px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                x: 0;
+                width: parent.width - 8px;
+            }
+        }
+
+        // Gutter - new line number
+        Rectangle {
+            width: 50px;
+            background: line.line-type == "add" ? Theme.diff-add-gutter :
+                        line.line-type == "remove" ? Theme.diff-remove-gutter :
+                        Theme.bg-secondary;
+
+            // Subtle separator
+            Rectangle {
+                x: 0;
+                width: 1px;
+                background: Theme.border-subtle;
+            }
+
+            Text {
+                text: line.new-line-num;
+                color: Theme.text-muted;
+                font-size: 12px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                x: 0;
+                width: parent.width - 8px;
+            }
+        }
+
+        // Sign column
+        Rectangle {
+            width: 24px;
+
+            Text {
+                text: line.line-type == "add" ? "+" :
+                      line.line-type == "remove" ? "-" :
+                      line.line-type == "hunk" ? "@@" : " ";
+                color: line.line-type == "add" ? Theme.diff-add-text :
+                       line.line-type == "remove" ? Theme.diff-remove-text :
+                       line.line-type == "hunk" ? Theme.diff-hunk-text :
+                       Theme.text-muted;
+                font-size: 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Code content
+        Rectangle {
+            Text {
+                text: line.content;
+                color: line.line-type == "add" ? Theme.diff-add-text :
+                       line.line-type == "remove" ? Theme.diff-remove-text :
+                       line.line-type == "hunk" ? Theme.diff-hunk-text :
+                       Theme.text-primary;
+                font-size: 13px;
+                vertical-alignment: center;
+                x: 8px;
+            }
+        }
+    }
+}
+
+export component UnifiedView inherits Rectangle {
+    in property <[DiffLine]> lines;
+
+    background: Theme.bg-primary;
+
+    Flickable {
+        viewport-height: lines.length * 22px;
+        viewport-width: max(self.width, 2000px);
+
+        VerticalLayout {
+            for line in lines: UnifiedLine {
+                line: line;
+            }
+        }
+    }
+}

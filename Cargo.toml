@@ -1,0 +1,21 @@
+[package]
+name = "lado"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "lado"
+path = "src/main.rs"
+
+[dependencies]
+slint = "1.9"
+git2 = "0.19"
+syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+anyhow = "1.0"
+thiserror = "2.0"
+serde_json = "1.0"
+
+[build-dependencies]
+slint-build = "1.9"
