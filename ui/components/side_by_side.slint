@@ -1,12 +1,64 @@
 import { Theme } from "../theme.slint";
 import { DiffLine } from "../structs.slint";
 
+component SideBySideCommentLine inherits Rectangle {
+    in property <DiffLine> line;
+
+    background: Theme.comment-bg;
+    clip: true;
+
+    // Left border indicator
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 4px;
+        height: 100%;
+        background: line.comment-is-reply ? Theme.comment-border : Theme.comment-author;
+    }
+
+    VerticalLayout {
+        padding-left: line.comment-is-reply ? 32px : 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 4px;
+
+        // Author and timestamp header
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: line.comment-author;
+                color: Theme.comment-author;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: line.comment-timestamp;
+                color: Theme.comment-timestamp;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Comment body with word wrap
+        Text {
+            text: line.comment-body;
+            color: Theme.comment-body;
+            font-size: 13px;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
 component SideLine inherits Rectangle {
     in property <string> line-num;
     in property <string> content;
     in property <string> line-type; // "add", "remove", "context", "empty"
 
-    height: 22px;
     background: line-type == "add" ? Theme.diff-add-bg :
                 line-type == "remove" ? Theme.diff-remove-bg :
                 line-type == "empty" ? Theme.bg-tertiary :
@@ -67,6 +119,54 @@ component SideLine inherits Rectangle {
     }
 }
 
+component LeftLineItem inherits Rectangle {
+    in property <DiffLine> line;
+
+    height: line.line-type == "comment" ? 80px : 22px;
+
+    SideBySideCommentLine {
+        line: root.line;
+        visible: root.line.line-type == "comment";
+        width: 100%;
+        height: 100%;
+    }
+
+    SideLine {
+        visible: root.line.line-type != "comment";
+        line-num: root.line.old-line-num;
+        content: root.line.line-type == "add" ? "" : root.line.content;
+        line-type: root.line.line-type == "add" ? "empty" :
+                   root.line.line-type == "hunk" ? "context" :
+                   root.line.line-type;
+        width: 100%;
+        height: 100%;
+    }
+}
+
+component RightLineItem inherits Rectangle {
+    in property <DiffLine> line;
+
+    height: line.line-type == "comment" ? 80px : 22px;
+
+    SideBySideCommentLine {
+        line: root.line;
+        visible: root.line.line-type == "comment";
+        width: 100%;
+        height: 100%;
+    }
+
+    SideLine {
+        visible: root.line.line-type != "comment";
+        line-num: root.line.new-line-num;
+        content: root.line.line-type == "remove" ? "" : root.line.content;
+        line-type: root.line.line-type == "remove" ? "empty" :
+                   root.line.line-type == "hunk" ? "context" :
+                   root.line.line-type;
+        width: 100%;
+        height: 100%;
+    }
+}
+
 export component SideBySideView inherits Rectangle {
     in property <[DiffLine]> lines;
 
@@ -107,16 +207,12 @@ export component SideBySideView inherits Rectangle {
             Flickable {
                 y: 32px;
                 height: parent.height - 32px;
-                viewport-height: lines.length * 22px;
                 viewport-width: max(self.width, 1000px);
 
                 VerticalLayout {
-                    for line in lines: SideLine {
-                        line-num: line.old-line-num;
-                        content: line.line-type == "add" ? "" : line.content;
-                        line-type: line.line-type == "add" ? "empty" :
-                                   line.line-type == "hunk" ? "context" :
-                                   line.line-type;
+                    for line in lines: LeftLineItem {
+                        line: line;
+                        width: parent.width;
                     }
                 }
             }
@@ -162,16 +258,12 @@ export component SideBySideView inherits Rectangle {
             Flickable {
                 y: 32px;
                 height: parent.height - 32px;
-                viewport-height: lines.length * 22px;
                 viewport-width: max(self.width, 1000px);
 
                 VerticalLayout {
-                    for line in lines: SideLine {
-                        line-num: line.new-line-num;
-                        content: line.line-type == "remove" ? "" : line.content;
-                        line-type: line.line-type == "remove" ? "empty" :
-                                   line.line-type == "hunk" ? "context" :
-                                   line.line-type;
+                    for line in lines: RightLineItem {
+                        line: line;
+                        width: parent.width;
                     }
                 }
             }

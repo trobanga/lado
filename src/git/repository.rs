@@ -198,6 +198,7 @@ impl Repository {
                             old_line_num: line.old_lineno(),
                             new_line_num: line.new_lineno(),
                             content,
+                            comment: None,
                         });
 
                         // Update file stats

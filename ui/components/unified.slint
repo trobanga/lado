@@ -1,10 +1,62 @@
 import { Theme } from "../theme.slint";
 import { DiffLine } from "../structs.slint";
 
+component CommentLine inherits Rectangle {
+    in property <DiffLine> line;
+
+    background: Theme.comment-bg;
+    clip: true;
+
+    // Left border indicator
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 4px;
+        height: 100%;
+        background: line.comment-is-reply ? Theme.comment-border : Theme.comment-author;
+    }
+
+    VerticalLayout {
+        padding-left: line.comment-is-reply ? 32px : 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 4px;
+
+        // Author and timestamp header
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: line.comment-author;
+                color: Theme.comment-author;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: line.comment-timestamp;
+                color: Theme.comment-timestamp;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Comment body with word wrap
+        Text {
+            text: line.comment-body;
+            color: Theme.comment-body;
+            font-size: 13px;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
 component UnifiedLine inherits Rectangle {
     in property <DiffLine> line;
 
-    height: 22px;
     background: line.line-type == "add" ? Theme.diff-add-bg :
                 line.line-type == "remove" ? Theme.diff-remove-bg :
                 line.line-type == "hunk" ? Theme.diff-hunk-bg :
@@ -90,6 +142,27 @@ component UnifiedLine inherits Rectangle {
     }
 }
 
+component LineItem inherits Rectangle {
+    in property <DiffLine> line;
+
+    // Fixed height: 22px for diff lines, 80px for comments
+    height: line.line-type == "comment" ? 80px : 22px;
+
+    CommentLine {
+        line: root.line;
+        visible: root.line.line-type == "comment";
+        width: 100%;
+        height: 100%;
+    }
+
+    UnifiedLine {
+        line: root.line;
+        visible: root.line.line-type != "comment";
+        width: 100%;
+        height: 100%;
+    }
+}
+
 export component UnifiedView inherits Rectangle {
     in property <[DiffLine]> lines;
 
@@ -98,13 +171,12 @@ export component UnifiedView inherits Rectangle {
     Flickable {
         width: 100%;
         height: 100%;
-        viewport-height: lines.length * 22px;
         viewport-width: max(self.width, 2000px);
-        viewport-y: 0;
 
         VerticalLayout {
-            for line in lines: UnifiedLine {
+            for line in lines: LineItem {
                 line: line;
+                width: parent.width;
             }
         }
     }
