@@ -1,6 +1,59 @@
 import { Theme } from "../theme.slint";
 import { DiffLine } from "../structs.slint";
 
+component SideBySideCommentLine inherits Rectangle {
+    in property <DiffLine> line;
+
+    min-height: 60px;
+    background: Theme.comment-bg;
+
+    // Left border indicator
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 4px;
+        height: 100%;
+        background: line.comment-is-reply ? Theme.comment-border : Theme.comment-author;
+    }
+
+    VerticalLayout {
+        padding-left: line.comment-is-reply ? 32px : 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 4px;
+
+        // Author and timestamp header
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: line.comment-author;
+                color: Theme.comment-author;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: line.comment-timestamp;
+                color: Theme.comment-timestamp;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Comment body with word wrap
+        Text {
+            text: line.comment-body;
+            color: Theme.comment-body;
+            font-size: 13px;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
 component SideLine inherits Rectangle {
     in property <string> line-num;
     in property <string> content;
@@ -111,12 +164,18 @@ export component SideBySideView inherits Rectangle {
                 viewport-width: max(self.width, 1000px);
 
                 VerticalLayout {
-                    for line in lines: SideLine {
-                        line-num: line.old-line-num;
-                        content: line.line-type == "add" ? "" : line.content;
-                        line-type: line.line-type == "add" ? "empty" :
-                                   line.line-type == "hunk" ? "context" :
-                                   line.line-type;
+                    for line in lines: Rectangle {
+                        if line.line-type == "comment": SideBySideCommentLine {
+                            line: line;
+                            width: 100%;
+                        }
+                        if line.line-type != "comment": SideLine {
+                            line-num: line.old-line-num;
+                            content: line.line-type == "add" ? "" : line.content;
+                            line-type: line.line-type == "add" ? "empty" :
+                                       line.line-type == "hunk" ? "context" :
+                                       line.line-type;
+                        }
                     }
                 }
             }
@@ -166,12 +225,18 @@ export component SideBySideView inherits Rectangle {
                 viewport-width: max(self.width, 1000px);
 
                 VerticalLayout {
-                    for line in lines: SideLine {
-                        line-num: line.new-line-num;
-                        content: line.line-type == "remove" ? "" : line.content;
-                        line-type: line.line-type == "remove" ? "empty" :
-                                   line.line-type == "hunk" ? "context" :
-                                   line.line-type;
+                    for line in lines: Rectangle {
+                        if line.line-type == "comment": SideBySideCommentLine {
+                            line: line;
+                            width: 100%;
+                        }
+                        if line.line-type != "comment": SideLine {
+                            line-num: line.new-line-num;
+                            content: line.line-type == "remove" ? "" : line.content;
+                            line-type: line.line-type == "remove" ? "empty" :
+                                       line.line-type == "hunk" ? "context" :
+                                       line.line-type;
+                        }
                     }
                 }
             }

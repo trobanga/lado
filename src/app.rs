@@ -1,6 +1,6 @@
 use crate::cli::{Args, DiffTarget};
 use crate::git::{build_file_tree, flatten_tree, DiffData, Repository};
-use crate::github;
+use crate::github::{self, FileComments};
 use crate::models::{DiffLineModel, FileEntryModel};
 use crate::{DiffLine, FileEntry, MainWindow};
 use anyhow::{Context, Result};
@@ -13,6 +13,7 @@ pub struct App {
     repo: Repository,
     target: DiffTarget,
     diff_data: Rc<RefCell<Option<DiffData>>>,
+    pr_comments: Rc<RefCell<Option<FileComments>>>,
 }
 
 impl App {
@@ -37,6 +38,7 @@ impl App {
             repo,
             target,
             diff_data: Rc::new(RefCell::new(None)),
+            pr_comments: Rc::new(RefCell::new(None)),
         };
 
         app.setup_callbacks()?;
@@ -48,6 +50,7 @@ impl App {
     fn setup_callbacks(&self) -> Result<()> {
         let window_weak = self.window.as_weak();
         let diff_data = Rc::clone(&self.diff_data);
+        let pr_comments = Rc::clone(&self.pr_comments);
 
         // File selection callback
         self.window.on_file_selected(move |path| {
@@ -55,7 +58,8 @@ impl App {
             let path_str = path.to_string();
 
             if let Some(ref data) = *diff_data.borrow() {
-                let lines = get_lines_for_file(data, &path_str);
+                let comments = pr_comments.borrow();
+                let lines = get_lines_for_file(data, &path_str, comments.as_ref());
                 window.set_lines(lines);
             }
 
@@ -95,6 +99,18 @@ impl App {
                 let (base_ref, head_ref) = github::get_pr_refs(*pr_num)?;
                 let base = self.repo.resolve_ref(&base_ref)?;
                 let head = self.repo.resolve_ref(&head_ref)?;
+
+                // Fetch PR comments
+                match github::get_pr_comments(*pr_num) {
+                    Ok(comments) => {
+                        let grouped = github::group_comments_by_file(comments);
+                        *self.pr_comments.borrow_mut() = Some(grouped);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not fetch PR comments: {}", e);
+                    }
+                }
+
                 (base, head)
             }
         };
@@ -118,7 +134,8 @@ impl App {
         // If there are files, select the first file (not folder) and load its diff
         if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
             self.window.set_selected_file(first_file.path.clone().into());
-            let lines = get_lines_for_file(&diff_data, &first_file.path);
+            let comments = self.pr_comments.borrow();
+            let lines = get_lines_for_file(&diff_data, &first_file.path, comments.as_ref());
             self.window.set_lines(lines);
         }
 
@@ -134,12 +151,21 @@ impl App {
     }
 }
 
-/// Convert hunks for a file into Slint-compatible DiffLine model
-fn get_lines_for_file(data: &DiffData, path: &str) -> ModelRc<DiffLine> {
-    use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+/// Convert hunks for a file into Slint-compatible DiffLine model, interleaving comments
+fn get_lines_for_file(
+    data: &DiffData,
+    path: &str,
+    comments: Option<&FileComments>,
+) -> ModelRc<DiffLine> {
+    use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
 
     let hunks = data.file_hunks.get(path).cloned().unwrap_or_default();
-    let lines: Vec<DiffLine> = hunks
+
+    // Get comments for this file, if any
+    let file_comments = comments.and_then(|c| c.get(path));
+
+    // First, collect all diff lines with their line numbers
+    let diff_lines: Vec<GitDiffLine> = hunks
         .into_iter()
         .flat_map(|hunk| {
             // Create hunk header line (trim trailing newline from git2)
@@ -148,11 +174,72 @@ fn get_lines_for_file(data: &DiffData, path: &str) -> ModelRc<DiffLine> {
                 old_line_num: None,
                 new_line_num: None,
                 content: hunk.header.trim_end().to_string(),
+                comment: None,
             };
             // Prepend header to hunk lines
             std::iter::once(header_line).chain(hunk.lines)
         })
-        .map(|l| DiffLineModel::from(&l).into())
         .collect();
-    ModelRc::new(VecModel::from(lines))
+
+    // Build the final lines, interleaving comments
+    let mut result: Vec<DiffLine> = Vec::new();
+
+    for diff_line in diff_lines {
+        // Add the diff line itself
+        result.push(DiffLineModel::from(&diff_line).into());
+
+        // Check if there are comments for this line
+        if let Some(comments) = file_comments {
+            // Get the appropriate line number based on comment side
+            let new_line = diff_line.new_line_num;
+            let old_line = diff_line.old_line_num;
+
+            // Find comments that target this line
+            for comment in comments {
+                let is_match = match comment.line {
+                    Some(line) => {
+                        // Match based on which side the comment is on
+                        match comment.side {
+                            github::CommentSide::Right => new_line == Some(line),
+                            github::CommentSide::Left => old_line == Some(line),
+                        }
+                    }
+                    None => false, // Skip comments without line numbers
+                };
+
+                if is_match {
+                    // Create a comment line
+                    let comment_line = GitDiffLine {
+                        line_type: DiffLineType::Comment,
+                        old_line_num: None,
+                        new_line_num: None,
+                        content: String::new(),
+                        comment: Some(CommentData {
+                            author: comment.author.clone(),
+                            body: comment.body.clone(),
+                            timestamp: format_timestamp(&comment.created_at),
+                            is_reply: comment.in_reply_to_id.is_some(),
+                        }),
+                    };
+                    result.push(DiffLineModel::from(&comment_line).into());
+                }
+            }
+        }
+    }
+
+    ModelRc::new(VecModel::from(result))
+}
+
+/// Format a GitHub timestamp to a more readable format
+fn format_timestamp(timestamp: &str) -> String {
+    // GitHub timestamps are in ISO 8601 format: "2024-01-15T10:30:00Z"
+    // Parse and format to something more readable
+    if timestamp.len() >= 16 {
+        // Extract "2024-01-15 10:30"
+        let date = &timestamp[0..10];
+        let time = &timestamp[11..16];
+        format!("{} {}", date, time)
+    } else {
+        timestamp.to_string()
+    }
 }

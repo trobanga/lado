@@ -36,6 +36,16 @@ pub enum DiffLineType {
     Remove,
     Context,
     Hunk,
+    Comment,
+}
+
+/// Data for a comment line
+#[derive(Debug, Clone, Default)]
+pub struct CommentData {
+    pub author: String,
+    pub body: String,
+    pub timestamp: String,
+    pub is_reply: bool,
 }
 
 /// A single line in a diff
@@ -45,6 +55,7 @@ pub struct DiffLine {
     pub old_line_num: Option<u32>,
     pub new_line_num: Option<u32>,
     pub content: String,
+    pub comment: Option<CommentData>,
 }
 
 /// A hunk in a diff

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use std::collections::HashMap;
 use std::process::Command;
 
 /// Represents PR branch information
@@ -9,6 +10,29 @@ pub struct PrInfo {
     pub head_ref: String,
     pub title: String,
 }
+
+/// Which side of the diff a comment is on
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommentSide {
+    Left,  // Old/original code (deletions)
+    Right, // New/modified code (additions)
+}
+
+/// A single PR review comment
+#[derive(Debug, Clone)]
+pub struct PrComment {
+    pub id: u64,
+    pub in_reply_to_id: Option<u64>,
+    pub path: String,
+    pub line: Option<u32>,
+    pub side: CommentSide,
+    pub body: String,
+    pub author: String,
+    pub created_at: String,
+}
+
+/// Comments grouped by file path, then by line number
+pub type FileComments = HashMap<String, Vec<PrComment>>;
 
 /// Fetch PR information using the gh CLI
 pub fn get_pr_info(pr_number: u32) -> Result<PrInfo> {
@@ -57,4 +81,75 @@ pub fn get_pr_info(pr_number: u32) -> Result<PrInfo> {
 pub fn get_pr_refs(pr_number: u32) -> Result<(String, String)> {
     let info = get_pr_info(pr_number)?;
     Ok((info.base_ref, info.head_ref))
+}
+
+/// Fetch PR review comments using the gh CLI
+pub fn get_pr_comments(pr_number: u32) -> Result<Vec<PrComment>> {
+    let output = Command::new("gh")
+        .args([
+            "api",
+            &format!("repos/{{owner}}/{{repo}}/pulls/{}/comments", pr_number),
+            "--paginate",
+        ])
+        .output()
+        .context("Failed to execute gh CLI. Is it installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("gh api failed: {}", stderr));
+    }
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("Failed to parse gh output")?;
+
+    let comments_array = json.as_array().ok_or_else(|| anyhow!("Expected array"))?;
+
+    let mut comments = Vec::new();
+    for comment in comments_array {
+        let id = comment["id"].as_u64().unwrap_or(0);
+        let in_reply_to_id = comment["in_reply_to_id"].as_u64();
+        let path = comment["path"].as_str().unwrap_or("").to_string();
+        let line = comment["line"].as_u64().map(|n| n as u32);
+        let side = match comment["side"].as_str() {
+            Some("LEFT") => CommentSide::Left,
+            _ => CommentSide::Right,
+        };
+        let body = comment["body"].as_str().unwrap_or("").to_string();
+        let author = comment["user"]["login"].as_str().unwrap_or("").to_string();
+        let created_at = comment["created_at"].as_str().unwrap_or("").to_string();
+
+        comments.push(PrComment {
+            id,
+            in_reply_to_id,
+            path,
+            line,
+            side,
+            body,
+            author,
+            created_at,
+        });
+    }
+
+    Ok(comments)
+}
+
+/// Group comments by file path
+pub fn group_comments_by_file(comments: Vec<PrComment>) -> FileComments {
+    let mut grouped: FileComments = HashMap::new();
+    for comment in comments {
+        grouped.entry(comment.path.clone()).or_default().push(comment);
+    }
+    // Sort comments within each file by line number, then by creation time for threads
+    for comments in grouped.values_mut() {
+        comments.sort_by(|a, b| {
+            let line_cmp = a.line.cmp(&b.line);
+            if line_cmp == std::cmp::Ordering::Equal {
+                // Sort by id to maintain thread order (reply ids are higher)
+                a.id.cmp(&b.id)
+            } else {
+                line_cmp
+            }
+        });
+    }
+    grouped
 }
