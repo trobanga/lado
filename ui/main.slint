@@ -3,6 +3,7 @@ import { FileEntry, DiffLine, PrCommitEntry } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
+import { CommitList } from "components/commit_list.slint";
 
 // Re-export structs for Rust access
 export { FileEntry, DiffLine, PrCommitEntry }
@@ -34,18 +35,12 @@ export component MainWindow inherits Window {
         Toolbar {
             side-by-side: root.side-by-side-mode;
             diff-title: root.diff-title;
-            commits: root.commits;
-            selected-commit-index: root.selected-commit-index;
             toggle-view => {
                 root.side-by-side-mode = !root.side-by-side-mode;
                 root.toggle-view-mode();
             }
             refresh => {
                 root.refresh-diff();
-            }
-            commit-selected(idx) => {
-                root.selected-commit-index = idx;
-                root.commit-selected(idx);
             }
         }
 
@@ -62,12 +57,25 @@ export component MainWindow inherits Window {
                     background: Theme.border-subtle;
                 }
 
-                FileTree {
-                    selected-file: root.selected-file;
-                    files: root.files;
-                    file-clicked(path) => {
-                        root.selected-file = path;
-                        root.file-selected(path);
+                VerticalLayout {
+                    // Commit list (collapsible, above file tree)
+                    CommitList {
+                        commits: root.commits;
+                        selected-index: root.selected-commit-index;
+                        commit-selected(idx) => {
+                            root.selected-commit-index = idx;
+                            root.commit-selected(idx);
+                        }
+                    }
+
+                    // File tree
+                    FileTree {
+                        selected-file: root.selected-file;
+                        files: root.files;
+                        file-clicked(path) => {
+                            root.selected-file = path;
+                            root.file-selected(path);
+                        }
                     }
                 }
             }
