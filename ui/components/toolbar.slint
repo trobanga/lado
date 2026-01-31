@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { PrCommitEntry } from "../structs.slint";
 
 component ToolbarButton inherits Rectangle {
     in property <string> label;
@@ -85,12 +86,160 @@ component ViewToggle inherits Rectangle {
     }
 }
 
+component CommitSelector inherits Rectangle {
+    in property <[PrCommitEntry]> commits: [];
+    in property <int> selected-index: -1;  // -1 = all changes
+
+    callback commit-selected(int);
+
+    property <bool> dropdown-open: false;
+    property <string> display-text: selected-index < 0 ? "All changes" :
+        (commits.length > 0 && selected-index >= 0 && selected-index < commits.length ?
+            commits[selected-index].short-sha + " " + commits[selected-index].summary : "All changes");
+
+    // Only show when there are commits
+    visible: commits.length > 0;
+
+    height: 28px;
+    min-width: 180px;
+    background: touch.has-hover ? Theme.bg-hover : Theme.bg-tertiary;
+    border-radius: 4px;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 6px;
+        alignment: space-between;
+
+        Text {
+            text: root.display-text;
+            color: Theme.text-secondary;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 200px;
+        }
+
+        // Dropdown arrow
+        Text {
+            text: dropdown-open ? "▲" : "▼";
+            color: Theme.text-muted;
+            font-size: 8px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.dropdown-open = !root.dropdown-open;
+        }
+    }
+
+    // Dropdown menu
+    if dropdown-open: Rectangle {
+        y: parent.height + 4px;
+        x: 0;
+        width: max(parent.width, 300px);
+        height: min((commits.length + 1) * 32px + 8px, 400px);
+        background: Theme.bg-secondary;
+        border-radius: 4px;
+        drop-shadow-blur: 8px;
+        drop-shadow-offset-y: 2px;
+        drop-shadow-color: #00000040;
+
+        VerticalLayout {
+            padding: 4px;
+
+            // "All changes" option
+            Rectangle {
+                height: 32px;
+                background: (selected-index < 0) ? Theme.bg-hover :
+                    (all-touch.has-hover ? Theme.bg-tertiary : transparent);
+                border-radius: 3px;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    alignment: start;
+
+                    Text {
+                        text: "All changes";
+                        color: (selected-index < 0) ? Theme.text-primary : Theme.text-secondary;
+                        font-size: 12px;
+                        font-weight: (selected-index < 0) ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+
+                all-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.commit-selected(-1);
+                        root.dropdown-open = false;
+                    }
+                }
+            }
+
+            // Separator
+            Rectangle {
+                height: 1px;
+                background: Theme.border-subtle;
+            }
+
+            // Commit list
+            for commit[idx] in commits: Rectangle {
+                height: 32px;
+                background: (idx == selected-index) ? Theme.bg-hover :
+                    (commit-touch.has-hover ? Theme.bg-tertiary : transparent);
+                border-radius: 3px;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    // Short SHA
+                    Text {
+                        text: commit.short-sha;
+                        color: Theme.accent-primary;
+                        font-size: 11px;
+                        font-family: "monospace";
+                        vertical-alignment: center;
+                    }
+
+                    // Commit summary (first line of message)
+                    Text {
+                        text: commit.summary;
+                        color: (idx == selected-index) ? Theme.text-primary : Theme.text-secondary;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                commit-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.commit-selected(idx);
+                        root.dropdown-open = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component Toolbar inherits Rectangle {
     in property <bool> side-by-side;
     in property <string> diff-title;
+    in property <[PrCommitEntry]> commits: [];
+    in property <int> selected-commit-index: -1;
 
     callback toggle-view;
     callback refresh;
+    callback commit-selected(int);
 
     height: 48px;
     background: Theme.bg-secondary;
@@ -131,6 +280,13 @@ export component Toolbar inherits Rectangle {
                 color: Theme.text-secondary;
                 font-size: 13px;
                 vertical-alignment: center;
+            }
+
+            // Commit selector (only visible for PRs with multiple commits)
+            CommitSelector {
+                commits: root.commits;
+                selected-index: root.selected-commit-index;
+                commit-selected(idx) => { root.commit-selected(idx); }
             }
         }
 

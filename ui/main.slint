@@ -1,11 +1,11 @@
 import { Theme } from "theme.slint";
-import { FileEntry, DiffLine } from "structs.slint";
+import { FileEntry, DiffLine, PrCommitEntry } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
 
 // Re-export structs for Rust access
-export { FileEntry, DiffLine }
+export { FileEntry, DiffLine, PrCommitEntry }
 
 export component MainWindow inherits Window {
     title: "lado";
@@ -20,23 +20,32 @@ export component MainWindow inherits Window {
     in-out property <string> diff-title: "No diff loaded";
     in-out property <[FileEntry]> files: [];
     in-out property <[DiffLine]> lines: [];
+    in-out property <[PrCommitEntry]> commits: [];
+    in-out property <int> selected-commit-index: -1;
 
     // Callbacks for Rust integration
     callback file-selected(string);
     callback toggle-view-mode();
     callback refresh-diff();
+    callback commit-selected(int);
 
     VerticalLayout {
         // Toolbar
         Toolbar {
             side-by-side: root.side-by-side-mode;
             diff-title: root.diff-title;
+            commits: root.commits;
+            selected-commit-index: root.selected-commit-index;
             toggle-view => {
                 root.side-by-side-mode = !root.side-by-side-mode;
                 root.toggle-view-mode();
             }
             refresh => {
                 root.refresh-diff();
+            }
+            commit-selected(idx) => {
+                root.selected-commit-index = idx;
+                root.commit-selected(idx);
             }
         }
 
