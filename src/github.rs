@@ -90,10 +90,9 @@ pub fn get_pr_info(pr_number: u32) -> Result<PrInfo> {
     })
 }
 
-/// Get the base and head refs for a PR
-pub fn get_pr_refs(pr_number: u32) -> Result<(String, String)> {
-    let info = get_pr_info(pr_number)?;
-    Ok((info.base_ref, info.head_ref))
+/// Get PR info including base/head refs and title
+pub fn get_pr_refs(pr_number: u32) -> Result<PrInfo> {
+    get_pr_info(pr_number)
 }
 
 /// Fetch PR review comments using the gh CLI

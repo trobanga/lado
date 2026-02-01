@@ -36,7 +36,17 @@ impl App {
             font_size: config.font_size,
             tab_width: config.tab_width,
             line_wrap: config.line_wrap,
+            key_unified: config.key_unified.clone().into(),
+            key_side_by_side: config.key_side_by_side.clone().into(),
+            key_scroll_down: config.key_scroll_down.clone().into(),
+            key_scroll_up: config.key_scroll_up.clone().into(),
+            key_file_next: config.key_file_next.clone().into(),
+            key_file_prev: config.key_file_prev.clone().into(),
+            key_prev_commit: config.key_prev_commit.clone().into(),
+            key_next_commit: config.key_next_commit.clone().into(),
         });
+        // Apply theme from config (theme is derived from theme-name in Slint)
+        window.set_theme_name(config.ui_theme.clone().into());
 
         // Set the diff title based on target
         let diff_title = match &target {
@@ -216,6 +226,14 @@ impl App {
                 font_size: settings.font_size,
                 tab_width: settings.tab_width,
                 line_wrap: settings.line_wrap,
+                key_unified: settings.key_unified.to_string(),
+                key_side_by_side: settings.key_side_by_side.to_string(),
+                key_scroll_down: settings.key_scroll_down.to_string(),
+                key_scroll_up: settings.key_scroll_up.to_string(),
+                key_file_next: settings.key_file_next.to_string(),
+                key_file_prev: settings.key_file_prev.to_string(),
+                key_prev_commit: settings.key_prev_commit.to_string(),
+                key_next_commit: settings.key_next_commit.to_string(),
             };
             if let Err(e) = crate::config::save(&config) {
                 eprintln!("Warning: Could not save settings: {}", e);
@@ -261,13 +279,17 @@ impl App {
                 (base, head)
             }
             DiffTarget::PullRequest(pr_num) => {
-                let (base_ref, head_ref) = github::get_pr_refs(*pr_num)?;
-                let base = self.repo.resolve_ref(&base_ref)?;
-                let head = self.repo.resolve_ref(&head_ref)?;
+                let pr_info = github::get_pr_refs(*pr_num)?;
+                let base = self.repo.resolve_ref(&pr_info.base_ref)?;
+                let head = self.repo.resolve_ref(&pr_info.head_ref)?;
+
+                // Update toolbar with PR title
+                self.window
+                    .set_diff_title(format!("PR #{}: {}", pr_num, pr_info.title).into());
 
                 // Store refs for later commit navigation
-                *self.pr_base_ref.borrow_mut() = Some(base_ref);
-                *self.pr_head_ref.borrow_mut() = Some(head_ref);
+                *self.pr_base_ref.borrow_mut() = Some(pr_info.base_ref);
+                *self.pr_head_ref.borrow_mut() = Some(pr_info.head_ref);
 
                 // Fetch PR commits
                 match github::get_pr_commits(*pr_num) {
