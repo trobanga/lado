@@ -59,6 +59,10 @@ export component MainWindow inherits Window {
     callback commit-selected(int);
     callback settings-changed(AppSettings);
 
+    init => {
+        main-focus.focus();
+    }
+
     // Scroll step for keyboard navigation
     property <length> scroll-step: 60px;
 
