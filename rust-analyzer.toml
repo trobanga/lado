@@ -1,0 +1,3 @@
+# Ignore Slint proc macros to reduce CPU/memory usage
+[procMacro.ignored]
+slint-macros = ["slint"]
