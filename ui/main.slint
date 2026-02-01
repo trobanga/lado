@@ -1,20 +1,25 @@
-import { Theme } from "theme.slint";
-import { FileEntry, DiffLine, PrCommitEntry } from "structs.slint";
+import { ThemeColors, ThemePresets } from "theme.slint";
+import { FileEntry, DiffLine, PrCommitEntry, TextSpan } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
 import { CommitList } from "components/commit_list.slint";
+import { SettingsPanel, AppSettings } from "components/settings_panel.slint";
 
 // Re-export structs for Rust access
-export { FileEntry, DiffLine, PrCommitEntry }
+export { FileEntry, DiffLine, PrCommitEntry, TextSpan, AppSettings, ThemeColors }
 
 export component MainWindow inherits Window {
     title: "lado";
-    background: Theme.bg-primary;
+    background: root.theme.bg-primary;
     min-width: 1200px;
     min-height: 700px;
     default-font-family: "IBM Plex Sans";
     default-font-size: 13px;
+
+    // Theme property - dynamic, can be set from Rust
+    in-out property <ThemeColors> theme: ThemePresets.dark();
+    in-out property <string> theme-name: "dark";
 
     in-out property <bool> side-by-side-mode: false;
     in-out property <string> selected-file: "";
@@ -23,16 +28,26 @@ export component MainWindow inherits Window {
     in-out property <[DiffLine]> lines: [];
     in-out property <[PrCommitEntry]> commits: [];
     in-out property <int> selected-commit-index: -1;
+    in-out property <bool> settings-visible: false;
+    in-out property <AppSettings> app-settings: {
+        ui-theme: "dark",
+        syntax-theme: "base16-ocean.dark",
+        font-size: 13,
+        tab-width: 4,
+        line-wrap: false,
+    };
 
     // Callbacks for Rust integration
     callback file-selected(string);
     callback toggle-view-mode();
     callback refresh-diff();
     callback commit-selected(int);
+    callback settings-changed(AppSettings);
 
     VerticalLayout {
         // Toolbar
         Toolbar {
+            theme: root.theme;
             side-by-side: root.side-by-side-mode;
             diff-title: root.diff-title;
             toggle-view => {
@@ -42,24 +57,30 @@ export component MainWindow inherits Window {
             refresh => {
                 root.refresh-diff();
             }
+            open-settings => {
+                root.settings-visible = true;
+            }
         }
 
         // Main content area
         HorizontalLayout {
+            vertical-stretch: 1;
+
             // File tree panel
             Rectangle {
                 width: 280px;
-                background: Theme.bg-secondary;
+                background: root.theme.bg-secondary;
 
                 Rectangle {
                     x: parent.width - 1px;
                     width: 1px;
-                    background: Theme.border-subtle;
+                    background: root.theme.border-subtle;
                 }
 
                 VerticalLayout {
                     // Commit list (collapsible, above file tree)
                     CommitList {
+                        theme: root.theme;
                         commits: root.commits;
                         selected-index: root.selected-commit-index;
                         commit-selected(idx) => {
@@ -70,6 +91,7 @@ export component MainWindow inherits Window {
 
                     // File tree
                     FileTree {
+                        theme: root.theme;
                         selected-file: root.selected-file;
                         files: root.files;
                         file-clicked(path) => {
@@ -82,10 +104,39 @@ export component MainWindow inherits Window {
 
             // Diff view area
             DiffView {
+                theme: root.theme;
                 side-by-side: root.side-by-side-mode;
                 selected-file: root.selected-file;
                 lines: root.lines;
+                font-size: root.app-settings.font-size * 1px;
             }
+        }
+    }
+
+    // Settings panel overlay (slides in from right)
+    SettingsPanel {
+        theme: root.theme;
+        panel-visible: root.settings-visible;
+        container-width: root.width;
+        height: root.height;
+        settings: root.app-settings;
+        settings-changed(s) => {
+            root.app-settings = s;
+            // Update theme based on ui-theme setting
+            if (s.ui-theme == "dark") {
+                root.theme = ThemePresets.dark();
+            } else if (s.ui-theme == "light") {
+                root.theme = ThemePresets.light();
+            } else if (s.ui-theme == "solarized-dark") {
+                root.theme = ThemePresets.solarized-dark();
+            } else if (s.ui-theme == "solarized-light") {
+                root.theme = ThemePresets.solarized-light();
+            }
+            root.theme-name = s.ui-theme;
+            root.settings-changed(s);
+        }
+        close-panel => {
+            root.settings-visible = false;
         }
     }
 }

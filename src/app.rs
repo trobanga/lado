@@ -1,7 +1,8 @@
 use crate::cli::{Args, DiffTarget};
 use crate::git::{build_file_tree, flatten_tree, DiffData, Repository};
 use crate::github::{self, FileComments, PrCommit};
-use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel};
+use crate::highlighting::SyntaxHighlighter;
+use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
 use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -18,6 +19,7 @@ pub struct App {
     all_pr_comments: Rc<RefCell<Vec<github::PrComment>>>,
     pr_base_ref: Rc<RefCell<Option<String>>>,
     pr_head_ref: Rc<RefCell<Option<String>>>,
+    highlighter: Rc<RefCell<SyntaxHighlighter>>,
 }
 
 impl App {
@@ -47,6 +49,7 @@ impl App {
             all_pr_comments: Rc::new(RefCell::new(Vec::new())),
             pr_base_ref: Rc::new(RefCell::new(None)),
             pr_head_ref: Rc::new(RefCell::new(None)),
+            highlighter: Rc::new(RefCell::new(SyntaxHighlighter::new())),
         };
 
         app.setup_callbacks()?;
@@ -59,6 +62,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let diff_data = Rc::clone(&self.diff_data);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let highlighter = Rc::clone(&self.highlighter);
 
         // File selection callback
         self.window.on_file_selected(move |path| {
@@ -67,7 +71,8 @@ impl App {
 
             if let Some(ref data) = *diff_data.borrow() {
                 let comments = pr_comments.borrow();
-                let lines = get_lines_for_file(data, &path_str, comments.as_ref());
+                let hl = highlighter.borrow();
+                let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl);
                 window.set_lines(lines);
             }
 
@@ -93,6 +98,7 @@ impl App {
         let pr_base_ref = Rc::clone(&self.pr_base_ref);
         let pr_head_ref = Rc::clone(&self.pr_head_ref);
         let all_pr_comments = Rc::clone(&self.all_pr_comments);
+        let highlighter = Rc::clone(&self.highlighter);
         self.window.on_commit_selected(move |idx| {
             let window = window_weak.unwrap();
             let commits = pr_commits.borrow();
@@ -175,8 +181,41 @@ impl App {
                 // If there are files, select the first file (not folder) and load its diff
                 if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
                     window.set_selected_file(first_file.path.clone().into());
-                    let lines =
-                        get_lines_for_file(&diff_data, &first_file.path, grouped_comments.as_ref());
+                    let hl = highlighter.borrow();
+                    let lines = get_lines_for_file(
+                        &diff_data,
+                        &first_file.path,
+                        grouped_comments.as_ref(),
+                        &hl,
+                    );
+                    window.set_lines(lines);
+                }
+            }
+        });
+
+        // Settings changed callback
+        let highlighter = Rc::clone(&self.highlighter);
+        let window_weak = self.window.as_weak();
+        let diff_data = Rc::clone(&self.diff_data);
+        let pr_comments = Rc::clone(&self.pr_comments);
+        self.window.on_settings_changed(move |settings| {
+            // Map UI theme to syntax theme if needed
+            let syntax_theme = match settings.ui_theme.as_str() {
+                "light" => "InspiredGitHub".to_string(),
+                "solarized-light" => "Solarized (light)".to_string(),
+                "solarized-dark" => "Solarized (dark)".to_string(),
+                _ => settings.syntax_theme.to_string(), // Use selected syntax theme for dark
+            };
+            highlighter.borrow_mut().set_theme(&syntax_theme);
+
+            // Re-highlight currently selected file
+            let window = window_weak.unwrap();
+            let selected_file = window.get_selected_file().to_string();
+            if !selected_file.is_empty() {
+                if let Some(ref data) = *diff_data.borrow() {
+                    let comments = pr_comments.borrow();
+                    let hl = highlighter.borrow();
+                    let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl);
                     window.set_lines(lines);
                 }
             }
@@ -261,7 +300,8 @@ impl App {
         if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
             self.window.set_selected_file(first_file.path.clone().into());
             let comments = self.pr_comments.borrow();
-            let lines = get_lines_for_file(&diff_data, &first_file.path, comments.as_ref());
+            let hl = self.highlighter.borrow();
+            let lines = get_lines_for_file(&diff_data, &first_file.path, comments.as_ref(), &hl);
             self.window.set_lines(lines);
         }
 
@@ -282,8 +322,10 @@ fn get_lines_for_file(
     data: &DiffData,
     path: &str,
     comments: Option<&FileComments>,
+    highlighter: &SyntaxHighlighter,
 ) -> ModelRc<DiffLine> {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
+    use crate::models::parse_hex_color;
 
     let hunks = data.file_hunks.get(path).cloned().unwrap_or_default();
 
@@ -307,12 +349,55 @@ fn get_lines_for_file(
         })
         .collect();
 
+    // Reconstruct file content from diff lines for syntax highlighting
+    // We need to highlight the content to get spans for each line
+    let content_lines: Vec<(&GitDiffLine, String)> = diff_lines
+        .iter()
+        .filter(|l| {
+            matches!(
+                l.line_type,
+                DiffLineType::Add | DiffLineType::Remove | DiffLineType::Context
+            )
+        })
+        .map(|l| (l, l.content.clone()))
+        .collect();
+
+    // Create a combined content string for highlighting
+    let full_content: String = content_lines
+        .iter()
+        .map(|(_, c)| c.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+
+    // Highlight the content
+    let highlighted_lines = highlighter.highlight(&full_content, path);
+
+    // Map highlighted lines back to diff lines
+    let mut highlight_iter = highlighted_lines.into_iter();
+
     // Build the final lines, interleaving comments
     let mut result: Vec<DiffLine> = Vec::new();
 
-    for diff_line in diff_lines {
-        // Add the diff line itself
-        result.push(DiffLineModel::from(&diff_line).into());
+    for diff_line in &diff_lines {
+        // Convert to model
+        let mut model = DiffLineModel::from(diff_line);
+
+        // Add syntax highlighting spans for code lines
+        if matches!(
+            diff_line.line_type,
+            DiffLineType::Add | DiffLineType::Remove | DiffLineType::Context
+        ) {
+            if let Some(hl_line) = highlight_iter.next() {
+                model.spans = hl_line
+                    .spans
+                    .into_iter()
+                    .map(|s| TextSpanModel::new(s.text, parse_hex_color(&s.color)))
+                    .collect();
+            }
+        }
+
+        result.push(model.into());
 
         // Check if there are comments for this line
         if let Some(comments) = file_comments {

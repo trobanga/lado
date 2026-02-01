@@ -1,45 +1,241 @@
-// Color palette - industrial dark theme with refined accents
-export global Theme {
+// ThemeColors struct - all color properties for dynamic theming
+export struct ThemeColors {
     // Base colors
-    out property <color> bg-primary: #1a1b1e;
-    out property <color> bg-secondary: #212225;
-    out property <color> bg-tertiary: #2a2b2f;
-    out property <color> bg-hover: #323338;
-    out property <color> bg-selected: #3a3b40;
+    bg-primary: color,
+    bg-secondary: color,
+    bg-tertiary: color,
+    bg-hover: color,
+    bg-selected: color,
 
     // Border colors
-    out property <color> border-subtle: #2e2f33;
-    out property <color> border-normal: #3a3b40;
+    border-subtle: color,
+    border-normal: color,
 
     // Text colors
-    out property <color> text-primary: #e4e4e7;
-    out property <color> text-secondary: #a0a0a6;
-    out property <color> text-muted: #6b6b73;
+    text-primary: color,
+    text-secondary: color,
+    text-muted: color,
 
-    // Diff colors - muted for reduced eye strain
-    out property <color> diff-add-bg: #1a2e1a;
-    out property <color> diff-add-text: #7ec77e;
-    out property <color> diff-add-gutter: #2d4a2d;
-    out property <color> diff-remove-bg: #2e1a1a;
-    out property <color> diff-remove-text: #e07070;
-    out property <color> diff-remove-gutter: #4a2d2d;
-    out property <color> diff-context-bg: #1a1b1e;
-    out property <color> diff-hunk-bg: #252830;
-    out property <color> diff-hunk-text: #7090b0;
+    // Diff colors
+    diff-add-bg: color,
+    diff-add-text: color,
+    diff-add-gutter: color,
+    diff-remove-bg: color,
+    diff-remove-text: color,
+    diff-remove-gutter: color,
+    diff-context-bg: color,
+    diff-hunk-bg: color,
+    diff-hunk-text: color,
 
     // Accent colors
-    out property <color> accent-primary: #58a6ff;
-    out property <color> accent-secondary: #8b949e;
+    accent-primary: color,
+    accent-secondary: color,
 
     // Status colors
-    out property <color> status-added: #3fb950;
-    out property <color> status-modified: #d29922;
-    out property <color> status-deleted: #f85149;
+    status-added: color,
+    status-modified: color,
+    status-deleted: color,
 
     // Comment colors
-    out property <color> comment-bg: #2d333b;
-    out property <color> comment-border: #444c56;
-    out property <color> comment-author: #58a6ff;
-    out property <color> comment-body: #e4e4e7;
-    out property <color> comment-timestamp: #6b6b73;
+    comment-bg: color,
+    comment-border: color,
+    comment-author: color,
+    comment-body: color,
+    comment-timestamp: color,
 }
+
+// Theme presets as pure functions
+export global ThemePresets {
+    // Dark theme - industrial dark with refined accents (original)
+    pure public function dark() -> ThemeColors {
+        return {
+            // Base colors
+            bg-primary: #1a1b1e,
+            bg-secondary: #212225,
+            bg-tertiary: #2a2b2f,
+            bg-hover: #323338,
+            bg-selected: #3a3b40,
+
+            // Border colors
+            border-subtle: #2e2f33,
+            border-normal: #3a3b40,
+
+            // Text colors
+            text-primary: #e4e4e7,
+            text-secondary: #a0a0a6,
+            text-muted: #6b6b73,
+
+            // Diff colors - muted for reduced eye strain
+            diff-add-bg: #1a2e1a,
+            diff-add-text: #7ec77e,
+            diff-add-gutter: #2d4a2d,
+            diff-remove-bg: #2e1a1a,
+            diff-remove-text: #e07070,
+            diff-remove-gutter: #4a2d2d,
+            diff-context-bg: #1a1b1e,
+            diff-hunk-bg: #252830,
+            diff-hunk-text: #7090b0,
+
+            // Accent colors
+            accent-primary: #58a6ff,
+            accent-secondary: #8b949e,
+
+            // Status colors
+            status-added: #3fb950,
+            status-modified: #d29922,
+            status-deleted: #f85149,
+
+            // Comment colors
+            comment-bg: #2d333b,
+            comment-border: #444c56,
+            comment-author: #58a6ff,
+            comment-body: #e4e4e7,
+            comment-timestamp: #6b6b73,
+        };
+    }
+
+    // Light theme - clean and readable
+    pure public function light() -> ThemeColors {
+        return {
+            // Base colors
+            bg-primary: #ffffff,
+            bg-secondary: #f6f8fa,
+            bg-tertiary: #eaeef2,
+            bg-hover: #d8dee4,
+            bg-selected: #dbe5ed,
+
+            // Border colors
+            border-subtle: #d0d7de,
+            border-normal: #afb8c1,
+
+            // Text colors
+            text-primary: #1f2328,
+            text-secondary: #57606a,
+            text-muted: #8c959f,
+
+            // Diff colors - GitHub-style light theme
+            diff-add-bg: #e6ffec,
+            diff-add-text: #1a7f37,
+            diff-add-gutter: #ccffd8,
+            diff-remove-bg: #ffebe9,
+            diff-remove-text: #cf222e,
+            diff-remove-gutter: #ffd7d5,
+            diff-context-bg: #ffffff,
+            diff-hunk-bg: #f0f6fc,
+            diff-hunk-text: #0550ae,
+
+            // Accent colors
+            accent-primary: #0969da,
+            accent-secondary: #57606a,
+
+            // Status colors
+            status-added: #1a7f37,
+            status-modified: #9a6700,
+            status-deleted: #cf222e,
+
+            // Comment colors
+            comment-bg: #f6f8fa,
+            comment-border: #d0d7de,
+            comment-author: #0969da,
+            comment-body: #1f2328,
+            comment-timestamp: #8c959f,
+        };
+    }
+
+    // Solarized Dark theme
+    pure public function solarized-dark() -> ThemeColors {
+        return {
+            // Base colors (Solarized base03-base00)
+            bg-primary: #002b36,
+            bg-secondary: #073642,
+            bg-tertiary: #0a4050,
+            bg-hover: #0d4d5e,
+            bg-selected: #124e5f,
+
+            // Border colors
+            border-subtle: #0d4d5e,
+            border-normal: #2a5f6e,
+
+            // Text colors (Solarized base0-base1)
+            text-primary: #93a1a1,
+            text-secondary: #839496,
+            text-muted: #657b83,
+
+            // Diff colors
+            diff-add-bg: #003d1c,
+            diff-add-text: #859900,
+            diff-add-gutter: #004d23,
+            diff-remove-bg: #3d0011,
+            diff-remove-text: #dc322f,
+            diff-remove-gutter: #4d0016,
+            diff-context-bg: #002b36,
+            diff-hunk-bg: #003847,
+            diff-hunk-text: #268bd2,
+
+            // Accent colors (Solarized blue/cyan)
+            accent-primary: #268bd2,
+            accent-secondary: #2aa198,
+
+            // Status colors
+            status-added: #859900,
+            status-modified: #b58900,
+            status-deleted: #dc322f,
+
+            // Comment colors
+            comment-bg: #073642,
+            comment-border: #2a5f6e,
+            comment-author: #268bd2,
+            comment-body: #93a1a1,
+            comment-timestamp: #657b83,
+        };
+    }
+
+    // Solarized Light theme
+    pure public function solarized-light() -> ThemeColors {
+        return {
+            // Base colors (Solarized base3-base2)
+            bg-primary: #fdf6e3,
+            bg-secondary: #eee8d5,
+            bg-tertiary: #e5ddc8,
+            bg-hover: #ddd5c0,
+            bg-selected: #d5ccb8,
+
+            // Border colors
+            border-subtle: #e0d8c3,
+            border-normal: #c9c0ab,
+
+            // Text colors (Solarized base00-base01)
+            text-primary: #657b83,
+            text-secondary: #839496,
+            text-muted: #93a1a1,
+
+            // Diff colors
+            diff-add-bg: #e6f4e3,
+            diff-add-text: #657b00,
+            diff-add-gutter: #d6ecd1,
+            diff-remove-bg: #fbe8e5,
+            diff-remove-text: #b5211c,
+            diff-remove-gutter: #f7d5d0,
+            diff-context-bg: #fdf6e3,
+            diff-hunk-bg: #f3ecd5,
+            diff-hunk-text: #268bd2,
+
+            // Accent colors (Solarized blue/cyan)
+            accent-primary: #268bd2,
+            accent-secondary: #2aa198,
+
+            // Status colors
+            status-added: #859900,
+            status-modified: #b58900,
+            status-deleted: #dc322f,
+
+            // Comment colors
+            comment-bg: #eee8d5,
+            comment-border: #c9c0ab,
+            comment-author: #268bd2,
+            comment-body: #657b83,
+            comment-timestamp: #93a1a1,
+        };
+    }
+}
+

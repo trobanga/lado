@@ -1,7 +1,8 @@
-import { Theme } from "../theme.slint";
+import { ThemeColors } from "../theme.slint";
 import { PrCommitEntry } from "../structs.slint";
 
 export component CommitList inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <[PrCommitEntry]> commits: [];
     in property <int> selected-index: -1;  // -1 = all changes
 
@@ -12,13 +13,13 @@ export component CommitList inherits Rectangle {
     // Only show when there are commits
     visible: commits.length > 0;
 
-    background: Theme.bg-secondary;
+    background: theme.bg-secondary;
 
     VerticalLayout {
         // Header (collapsible)
         Rectangle {
             height: 32px;
-            background: header-touch.has-hover ? Theme.bg-hover : transparent;
+            background: header-touch.has-hover ? theme.bg-hover : transparent;
 
             HorizontalLayout {
                 padding-left: 12px;
@@ -32,14 +33,14 @@ export component CommitList inherits Rectangle {
                     // Collapse arrow
                     Text {
                         text: expanded ? "▼" : "▶";
-                        color: Theme.text-muted;
+                        color: theme.text-muted;
                         font-size: 10px;
                         vertical-alignment: center;
                     }
 
                     Text {
                         text: "Commits";
-                        color: Theme.text-secondary;
+                        color: theme.text-secondary;
                         font-size: 12px;
                         font-weight: 600;
                         vertical-alignment: center;
@@ -49,12 +50,12 @@ export component CommitList inherits Rectangle {
                     Rectangle {
                         height: 18px;
                         width: count-text.preferred-width + 12px;
-                        background: Theme.bg-tertiary;
+                        background: theme.bg-tertiary;
                         border-radius: 9px;
 
                         count-text := Text {
                             text: commits.length;
-                            color: Theme.text-muted;
+                            color: theme.text-muted;
                             font-size: 11px;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -81,8 +82,8 @@ export component CommitList inherits Rectangle {
             // "All changes" option
             Rectangle {
                 height: 28px;
-                background: (selected-index < 0) ? Theme.accent-primary :
-                    (all-touch.has-hover ? Theme.bg-hover : transparent);
+                background: (selected-index < 0) ? theme.accent-primary :
+                    (all-touch.has-hover ? theme.bg-hover : transparent);
                 border-radius: 4px;
 
                 HorizontalLayout {
@@ -92,7 +93,7 @@ export component CommitList inherits Rectangle {
 
                     Text {
                         text: "All changes";
-                        color: (selected-index < 0) ? Theme.bg-primary : Theme.text-secondary;
+                        color: (selected-index < 0) ? theme.bg-primary : theme.text-secondary;
                         font-size: 12px;
                         font-weight: (selected-index < 0) ? 600 : 400;
                         vertical-alignment: center;
@@ -110,8 +111,8 @@ export component CommitList inherits Rectangle {
             // Commit entries
             for commit[idx] in commits: Rectangle {
                 height: 28px;
-                background: (idx == selected-index) ? Theme.accent-primary :
-                    (commit-touch.has-hover ? Theme.bg-hover : transparent);
+                background: (idx == selected-index) ? theme.accent-primary :
+                    (commit-touch.has-hover ? theme.bg-hover : transparent);
                 border-radius: 4px;
 
                 HorizontalLayout {
@@ -123,7 +124,7 @@ export component CommitList inherits Rectangle {
                     // Short SHA
                     Text {
                         text: commit.short-sha;
-                        color: (idx == selected-index) ? Theme.bg-primary : Theme.accent-primary;
+                        color: (idx == selected-index) ? theme.bg-primary : theme.accent-primary;
                         font-size: 11px;
                         font-family: "monospace";
                         vertical-alignment: center;
@@ -132,7 +133,7 @@ export component CommitList inherits Rectangle {
                     // Commit summary
                     Text {
                         text: commit.summary;
-                        color: (idx == selected-index) ? Theme.bg-primary : Theme.text-secondary;
+                        color: (idx == selected-index) ? theme.bg-primary : theme.text-secondary;
                         font-size: 12px;
                         vertical-alignment: center;
                         overflow: elide;
@@ -151,7 +152,7 @@ export component CommitList inherits Rectangle {
         // Bottom border
         Rectangle {
             height: 1px;
-            background: Theme.border-subtle;
+            background: theme.border-subtle;
         }
     }
 }

@@ -1,10 +1,11 @@
-import { Theme } from "../theme.slint";
-import { DiffLine } from "../structs.slint";
+import { ThemeColors } from "../theme.slint";
+import { DiffLine, TextSpan } from "../structs.slint";
 
 component SideBySideCommentLine inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
 
-    background: Theme.comment-bg;
+    background: theme.comment-bg;
     clip: true;
 
     // Left border indicator
@@ -13,7 +14,7 @@ component SideBySideCommentLine inherits Rectangle {
         y: 0;
         width: 4px;
         height: 100%;
-        background: line.comment-is-reply ? Theme.comment-border : Theme.comment-author;
+        background: line.comment-is-reply ? theme.comment-border : theme.comment-author;
     }
 
     VerticalLayout {
@@ -30,14 +31,14 @@ component SideBySideCommentLine inherits Rectangle {
 
             Text {
                 text: line.comment-author;
-                color: Theme.comment-author;
+                color: theme.comment-author;
                 font-size: 12px;
                 font-weight: 600;
             }
 
             Text {
                 text: line.comment-timestamp;
-                color: Theme.comment-timestamp;
+                color: theme.comment-timestamp;
                 font-size: 11px;
                 vertical-alignment: center;
             }
@@ -46,7 +47,7 @@ component SideBySideCommentLine inherits Rectangle {
         // Comment body with word wrap
         Text {
             text: line.comment-body;
-            color: Theme.comment-body;
+            color: theme.comment-body;
             font-size: 13px;
             wrap: word-wrap;
             horizontal-stretch: 1;
@@ -55,27 +56,30 @@ component SideBySideCommentLine inherits Rectangle {
 }
 
 component SideLine inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <string> line-num;
     in property <string> content;
     in property <string> line-type; // "add", "remove", "context", "empty"
+    in property <[TextSpan]> spans: [];
+    in property <length> font-size: 13px;
 
-    background: line-type == "add" ? Theme.diff-add-bg :
-                line-type == "remove" ? Theme.diff-remove-bg :
-                line-type == "empty" ? Theme.bg-tertiary :
-                Theme.diff-context-bg;
+    background: line-type == "add" ? theme.diff-add-bg :
+                line-type == "remove" ? theme.diff-remove-bg :
+                line-type == "empty" ? theme.bg-tertiary :
+                theme.diff-context-bg;
 
     HorizontalLayout {
         // Gutter
         Rectangle {
             width: 50px;
-            background: line-type == "add" ? Theme.diff-add-gutter :
-                        line-type == "remove" ? Theme.diff-remove-gutter :
-                        line-type == "empty" ? Theme.bg-tertiary :
-                        Theme.bg-secondary;
+            background: line-type == "add" ? theme.diff-add-gutter :
+                        line-type == "remove" ? theme.diff-remove-gutter :
+                        line-type == "empty" ? theme.bg-tertiary :
+                        theme.bg-secondary;
 
             Text {
                 text: line-num;
-                color: Theme.text-muted;
+                color: theme.text-muted;
                 font-size: 12px;
                 horizontal-alignment: right;
                 vertical-alignment: center;
@@ -91,40 +95,58 @@ component SideLine inherits Rectangle {
             Text {
                 text: line-type == "add" ? "+" :
                       line-type == "remove" ? "-" : " ";
-                color: line-type == "add" ? Theme.diff-add-text :
-                       line-type == "remove" ? Theme.diff-remove-text :
-                       Theme.text-muted;
-                font-size: 12px;
+                color: line-type == "add" ? theme.diff-add-text :
+                       line-type == "remove" ? theme.diff-remove-text :
+                       theme.text-muted;
+                font-size: root.font-size;
                 font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        // Code content
+        // Code content - render spans with syntax highlighting
         Rectangle {
+            horizontal-stretch: 1;
             clip: true;
 
-            Text {
-                text: content;
-                color: line-type == "add" ? Theme.diff-add-text :
-                       line-type == "remove" ? Theme.diff-remove-text :
-                       line-type == "empty" ? transparent :
-                       Theme.text-primary;
-                font-size: 13px;
-                vertical-alignment: center;
+            HorizontalLayout {
                 x: 8px;
+                alignment: start;
+                spacing: 0px;
+
+                // Render syntax-highlighted spans if available
+                for span in spans: Text {
+                    text: span.text;
+                    color: span.color;
+                    font-size: root.font-size;
+                    font-family: "monospace";
+                }
+
+                // Fallback to plain content when no spans
+                if spans.length == 0: Text {
+                    text: content;
+                    color: line-type == "add" ? theme.diff-add-text :
+                           line-type == "remove" ? theme.diff-remove-text :
+                           line-type == "empty" ? transparent :
+                           theme.text-primary;
+                    font-size: root.font-size;
+                    font-family: "monospace";
+                }
             }
         }
     }
 }
 
 component LeftLineItem inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
+    in property <length> font-size: 13px;
 
-    height: line.line-type == "comment" ? 80px : 22px;
+    height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
     SideBySideCommentLine {
+        theme: root.theme;
         line: root.line;
         visible: root.line.line-type == "comment";
         width: 100%;
@@ -132,23 +154,29 @@ component LeftLineItem inherits Rectangle {
     }
 
     SideLine {
+        theme: root.theme;
         visible: root.line.line-type != "comment";
         line-num: root.line.old-line-num;
         content: root.line.line-type == "add" ? "" : root.line.content;
         line-type: root.line.line-type == "add" ? "empty" :
                    root.line.line-type == "hunk" ? "context" :
                    root.line.line-type;
+        spans: root.line.line-type == "add" ? [] : root.line.spans;
+        font-size: root.font-size;
         width: 100%;
         height: 100%;
     }
 }
 
 component RightLineItem inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
+    in property <length> font-size: 13px;
 
-    height: line.line-type == "comment" ? 80px : 22px;
+    height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
     SideBySideCommentLine {
+        theme: root.theme;
         line: root.line;
         visible: root.line.line-type == "comment";
         width: 100%;
@@ -156,37 +184,42 @@ component RightLineItem inherits Rectangle {
     }
 
     SideLine {
+        theme: root.theme;
         visible: root.line.line-type != "comment";
         line-num: root.line.new-line-num;
         content: root.line.line-type == "remove" ? "" : root.line.content;
         line-type: root.line.line-type == "remove" ? "empty" :
                    root.line.line-type == "hunk" ? "context" :
                    root.line.line-type;
+        spans: root.line.line-type == "remove" ? [] : root.line.spans;
+        font-size: root.font-size;
         width: 100%;
         height: 100%;
     }
 }
 
 export component SideBySideView inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
+    in property <length> font-size: 13px;
 
-    background: Theme.bg-primary;
+    background: theme.bg-primary;
 
     HorizontalLayout {
         // Left panel (old file)
         Rectangle {
-            background: Theme.bg-primary;
+            background: theme.bg-primary;
 
             // Panel header
             Rectangle {
                 y: 0;
                 height: 32px;
-                background: Theme.bg-secondary;
+                background: theme.bg-secondary;
 
                 Rectangle {
                     y: parent.height - 1px;
                     height: 1px;
-                    background: Theme.border-subtle;
+                    background: theme.border-subtle;
                 }
 
                 HorizontalLayout {
@@ -195,7 +228,7 @@ export component SideBySideView inherits Rectangle {
 
                     Text {
                         text: "Original";
-                        color: Theme.text-secondary;
+                        color: theme.text-secondary;
                         font-size: 12px;
                         font-weight: 500;
                         vertical-alignment: center;
@@ -211,7 +244,9 @@ export component SideBySideView inherits Rectangle {
 
                 VerticalLayout {
                     for line in lines: LeftLineItem {
+                        theme: root.theme;
                         line: line;
+                        font-size: root.font-size;
                         width: parent.width;
                     }
                 }
@@ -221,23 +256,23 @@ export component SideBySideView inherits Rectangle {
         // Divider
         Rectangle {
             width: 1px;
-            background: Theme.border-normal;
+            background: theme.border-normal;
         }
 
         // Right panel (new file)
         Rectangle {
-            background: Theme.bg-primary;
+            background: theme.bg-primary;
 
             // Panel header
             Rectangle {
                 y: 0;
                 height: 32px;
-                background: Theme.bg-secondary;
+                background: theme.bg-secondary;
 
                 Rectangle {
                     y: parent.height - 1px;
                     height: 1px;
-                    background: Theme.border-subtle;
+                    background: theme.border-subtle;
                 }
 
                 HorizontalLayout {
@@ -246,7 +281,7 @@ export component SideBySideView inherits Rectangle {
 
                     Text {
                         text: "Modified";
-                        color: Theme.text-secondary;
+                        color: theme.text-secondary;
                         font-size: 12px;
                         font-weight: 500;
                         vertical-alignment: center;
@@ -262,7 +297,9 @@ export component SideBySideView inherits Rectangle {
 
                 VerticalLayout {
                     for line in lines: RightLineItem {
+                        theme: root.theme;
                         line: line;
+                        font-size: root.font-size;
                         width: parent.width;
                     }
                 }

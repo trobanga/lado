@@ -1,6 +1,7 @@
-import { Theme } from "../theme.slint";
+import { ThemeColors } from "../theme.slint";
 
 component ToolbarButton inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <string> label;
     in property <bool> active: false;
 
@@ -9,7 +10,7 @@ component ToolbarButton inherits Rectangle {
     width: self.height * 2.5;
     height: 28px;
     border-radius: 4px;
-    background: touch.has-hover ? Theme.bg-hover : (active ? Theme.bg-tertiary : transparent);
+    background: touch.has-hover ? theme.bg-hover : (active ? theme.bg-tertiary : transparent);
 
     HorizontalLayout {
         padding-left: 8px;
@@ -19,7 +20,7 @@ component ToolbarButton inherits Rectangle {
 
         Text {
             text: label;
-            color: active ? Theme.text-primary : Theme.text-secondary;
+            color: active ? theme.text-primary : theme.text-secondary;
             font-size: 12px;
             vertical-alignment: center;
         }
@@ -32,24 +33,25 @@ component ToolbarButton inherits Rectangle {
 }
 
 component ViewToggle inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <bool> side-by-side;
     callback toggle;
 
     height: 28px;
     width: 160px;
-    background: Theme.bg-tertiary;
+    background: theme.bg-tertiary;
     border-radius: 4px;
 
     HorizontalLayout {
         padding: 2px;
 
         Rectangle {
-            background: !side-by-side ? Theme.bg-hover : transparent;
+            background: !side-by-side ? theme.bg-hover : transparent;
             border-radius: 3px;
 
             Text {
                 text: "Unified";
-                color: !side-by-side ? Theme.text-primary : Theme.text-muted;
+                color: !side-by-side ? theme.text-primary : theme.text-muted;
                 font-size: 11px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -64,12 +66,12 @@ component ViewToggle inherits Rectangle {
         }
 
         Rectangle {
-            background: side-by-side ? Theme.bg-hover : transparent;
+            background: side-by-side ? theme.bg-hover : transparent;
             border-radius: 3px;
 
             Text {
                 text: "Side by Side";
-                color: side-by-side ? Theme.text-primary : Theme.text-muted;
+                color: side-by-side ? theme.text-primary : theme.text-muted;
                 font-size: 11px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -86,20 +88,22 @@ component ViewToggle inherits Rectangle {
 }
 
 export component Toolbar inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <bool> side-by-side;
     in property <string> diff-title;
 
     callback toggle-view;
     callback refresh;
+    callback open-settings;
 
     height: 48px;
-    background: Theme.bg-secondary;
+    background: theme.bg-secondary;
 
     // Bottom border
     Rectangle {
         y: parent.height - 1px;
         height: 1px;
-        background: Theme.border-subtle;
+        background: theme.border-subtle;
     }
 
     HorizontalLayout {
@@ -114,7 +118,7 @@ export component Toolbar inherits Rectangle {
 
             Text {
                 text: "lado";
-                color: Theme.accent-primary;
+                color: theme.accent-primary;
                 font-size: 15px;
                 font-weight: 600;
                 vertical-alignment: center;
@@ -123,12 +127,12 @@ export component Toolbar inherits Rectangle {
             Rectangle {
                 width: 1px;
                 height: 20px;
-                background: Theme.border-normal;
+                background: theme.border-normal;
             }
 
             Text {
                 text: diff-title;
-                color: Theme.text-secondary;
+                color: theme.text-secondary;
                 font-size: 13px;
                 vertical-alignment: center;
             }
@@ -140,13 +144,36 @@ export component Toolbar inherits Rectangle {
             alignment: end;
 
             ViewToggle {
+                theme: root.theme;
                 side-by-side: root.side-by-side;
                 toggle => { root.toggle-view(); }
             }
 
             ToolbarButton {
+                theme: root.theme;
                 label: "Refresh";
                 clicked => { root.refresh(); }
+            }
+
+            // Settings gear button
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: settings-touch.has-hover ? theme.bg-hover : transparent;
+
+                Text {
+                    text: "⚙";
+                    color: theme.text-secondary;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                settings-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-settings(); }
+                }
             }
         }
     }

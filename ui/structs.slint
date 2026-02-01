@@ -1,4 +1,9 @@
 // Shared data structures
+export struct TextSpan {
+    text: string,
+    color: color,
+}
+
 export struct FileEntry {
     name: string,
     path: string,
@@ -21,6 +26,7 @@ export struct DiffLine {
     old-line-num: string,
     new-line-num: string,
     content: string,
+    spans: [TextSpan],      // Syntax-highlighted text segments
     // Comment fields (empty for non-comments)
     comment-author: string,
     comment-body: string,

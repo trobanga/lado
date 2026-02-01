@@ -1,10 +1,11 @@
-import { Theme } from "../theme.slint";
-import { DiffLine } from "../structs.slint";
+import { ThemeColors } from "../theme.slint";
+import { DiffLine, TextSpan } from "../structs.slint";
 
 component CommentLine inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
 
-    background: Theme.comment-bg;
+    background: theme.comment-bg;
     clip: true;
 
     // Left border indicator
@@ -13,7 +14,7 @@ component CommentLine inherits Rectangle {
         y: 0;
         width: 4px;
         height: 100%;
-        background: line.comment-is-reply ? Theme.comment-border : Theme.comment-author;
+        background: line.comment-is-reply ? theme.comment-border : theme.comment-author;
     }
 
     VerticalLayout {
@@ -30,14 +31,14 @@ component CommentLine inherits Rectangle {
 
             Text {
                 text: line.comment-author;
-                color: Theme.comment-author;
+                color: theme.comment-author;
                 font-size: 12px;
                 font-weight: 600;
             }
 
             Text {
                 text: line.comment-timestamp;
-                color: Theme.comment-timestamp;
+                color: theme.comment-timestamp;
                 font-size: 11px;
                 vertical-alignment: center;
             }
@@ -46,7 +47,7 @@ component CommentLine inherits Rectangle {
         // Comment body with word wrap
         Text {
             text: line.comment-body;
-            color: Theme.comment-body;
+            color: theme.comment-body;
             font-size: 13px;
             wrap: word-wrap;
             horizontal-stretch: 1;
@@ -55,24 +56,26 @@ component CommentLine inherits Rectangle {
 }
 
 component UnifiedLine inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
+    in property <length> font-size: 13px;
 
-    background: line.line-type == "add" ? Theme.diff-add-bg :
-                line.line-type == "remove" ? Theme.diff-remove-bg :
-                line.line-type == "hunk" ? Theme.diff-hunk-bg :
-                Theme.diff-context-bg;
+    background: line.line-type == "add" ? theme.diff-add-bg :
+                line.line-type == "remove" ? theme.diff-remove-bg :
+                line.line-type == "hunk" ? theme.diff-hunk-bg :
+                theme.diff-context-bg;
 
     HorizontalLayout {
         // Gutter - old line number
         Rectangle {
             width: 50px;
-            background: line.line-type == "add" ? Theme.diff-add-gutter :
-                        line.line-type == "remove" ? Theme.diff-remove-gutter :
-                        Theme.bg-secondary;
+            background: line.line-type == "add" ? theme.diff-add-gutter :
+                        line.line-type == "remove" ? theme.diff-remove-gutter :
+                        theme.bg-secondary;
 
             Text {
                 text: line.old-line-num;
-                color: Theme.text-muted;
+                color: theme.text-muted;
                 font-size: 12px;
                 horizontal-alignment: right;
                 vertical-alignment: center;
@@ -84,20 +87,20 @@ component UnifiedLine inherits Rectangle {
         // Gutter - new line number
         Rectangle {
             width: 50px;
-            background: line.line-type == "add" ? Theme.diff-add-gutter :
-                        line.line-type == "remove" ? Theme.diff-remove-gutter :
-                        Theme.bg-secondary;
+            background: line.line-type == "add" ? theme.diff-add-gutter :
+                        line.line-type == "remove" ? theme.diff-remove-gutter :
+                        theme.bg-secondary;
 
             // Subtle separator
             Rectangle {
                 x: 0;
                 width: 1px;
-                background: Theme.border-subtle;
+                background: theme.border-subtle;
             }
 
             Text {
                 text: line.new-line-num;
-                color: Theme.text-muted;
+                color: theme.text-muted;
                 font-size: 12px;
                 horizontal-alignment: right;
                 vertical-alignment: center;
@@ -113,11 +116,11 @@ component UnifiedLine inherits Rectangle {
             Text {
                 text: line.line-type == "add" ? "+" :
                       line.line-type == "remove" ? "-" : " ";
-                color: line.line-type == "add" ? Theme.diff-add-text :
-                       line.line-type == "remove" ? Theme.diff-remove-text :
-                       line.line-type == "hunk" ? Theme.diff-hunk-text :
-                       Theme.text-muted;
-                font-size: 13px;
+                color: line.line-type == "add" ? theme.diff-add-text :
+                       line.line-type == "remove" ? theme.diff-remove-text :
+                       line.line-type == "hunk" ? theme.diff-hunk-text :
+                       theme.text-muted;
+                font-size: root.font-size;
                 font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -125,30 +128,49 @@ component UnifiedLine inherits Rectangle {
             }
         }
 
-        // Code content
+        // Code content - render spans with syntax highlighting
         Rectangle {
-            Text {
-                text: line.content;
-                color: line.line-type == "add" ? Theme.diff-add-text :
-                       line.line-type == "remove" ? Theme.diff-remove-text :
-                       line.line-type == "hunk" ? Theme.diff-hunk-text :
-                       Theme.text-primary;
-                font-size: 13px;
-                vertical-alignment: center;
-                height: 100%;
+            horizontal-stretch: 1;
+            clip: true;
+
+            HorizontalLayout {
                 x: 8px;
+                alignment: start;
+                spacing: 0px;
+
+                // Render syntax-highlighted spans if available
+                for span in line.spans: Text {
+                    text: span.text;
+                    color: span.color;
+                    font-size: root.font-size;
+                    font-family: "monospace";
+                }
+
+                // Fallback to plain content when no spans (e.g., hunk headers)
+                if line.spans.length == 0: Text {
+                    text: line.content;
+                    color: line.line-type == "add" ? theme.diff-add-text :
+                           line.line-type == "remove" ? theme.diff-remove-text :
+                           line.line-type == "hunk" ? theme.diff-hunk-text :
+                           theme.text-primary;
+                    font-size: root.font-size;
+                    font-family: "monospace";
+                }
             }
         }
     }
 }
 
 component LineItem inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <DiffLine> line;
+    in property <length> font-size: 13px;
 
-    // Fixed height: 22px for diff lines, 80px for comments
-    height: line.line-type == "comment" ? 80px : 22px;
+    // Line height scales with font size (1.7x multiplier)
+    height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
     CommentLine {
+        theme: root.theme;
         line: root.line;
         visible: root.line.line-type == "comment";
         width: 100%;
@@ -156,7 +178,9 @@ component LineItem inherits Rectangle {
     }
 
     UnifiedLine {
+        theme: root.theme;
         line: root.line;
+        font-size: root.font-size;
         visible: root.line.line-type != "comment";
         width: 100%;
         height: 100%;
@@ -164,9 +188,11 @@ component LineItem inherits Rectangle {
 }
 
 export component UnifiedView inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
+    in property <length> font-size: 13px;
 
-    background: Theme.bg-primary;
+    background: theme.bg-primary;
 
     Flickable {
         width: 100%;
@@ -175,7 +201,9 @@ export component UnifiedView inherits Rectangle {
 
         VerticalLayout {
             for line in lines: LineItem {
+                theme: root.theme;
                 line: line;
+                font-size: root.font-size;
                 width: parent.width;
             }
         }

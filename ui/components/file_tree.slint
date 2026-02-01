@@ -1,20 +1,22 @@
-import { Theme } from "../theme.slint";
+import { ThemeColors } from "../theme.slint";
 import { FileEntry } from "../structs.slint";
 
 // File status indicator
 component StatusBadge inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <string> status; // "added", "modified", "deleted"
 
     width: 8px;
     height: 8px;
     border-radius: 4px;
-    background: status == "added" ? Theme.status-added :
-                status == "deleted" ? Theme.status-deleted :
-                Theme.status-modified;
+    background: status == "added" ? theme.status-added :
+                status == "deleted" ? theme.status-deleted :
+                theme.status-modified;
 }
 
 // Individual file/folder item
 component TreeItem inherits Rectangle {
+    in property <ThemeColors> theme;
     in property <string> name;
     in property <string> path;
     in property <int> depth;
@@ -27,8 +29,8 @@ component TreeItem inherits Rectangle {
     callback toggle-expand;
 
     height: 28px;
-    background: selected ? Theme.bg-selected :
-                (touch.has-hover ? Theme.bg-hover : transparent);
+    background: selected ? theme.bg-selected :
+                (touch.has-hover ? theme.bg-hover : transparent);
 
     HorizontalLayout {
         padding-left: 12px + (depth * 16px);
@@ -43,7 +45,7 @@ component TreeItem inherits Rectangle {
 
             Text {
                 text: is-expanded ? "v" : ">";
-                color: Theme.text-muted;
+                color: theme.text-muted;
                 font-size: 10px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -59,7 +61,7 @@ component TreeItem inherits Rectangle {
         Rectangle {
             width: 16px;
             height: 16px;
-            background: is-folder ? Theme.accent-secondary : transparent;
+            background: is-folder ? theme.accent-secondary : transparent;
             border-radius: 2px;
             opacity: 0.3;
         }
@@ -67,7 +69,7 @@ component TreeItem inherits Rectangle {
         // Name
         Text {
             text: name;
-            color: selected ? Theme.text-primary : Theme.text-secondary;
+            color: selected ? theme.text-primary : theme.text-secondary;
             font-size: 13px;
             vertical-alignment: center;
             overflow: elide;
@@ -77,6 +79,7 @@ component TreeItem inherits Rectangle {
 
         // Status badge for files
         if !is-folder: StatusBadge {
+            theme: root.theme;
             status: root.status;
         }
     }
@@ -88,6 +91,7 @@ component TreeItem inherits Rectangle {
 }
 
 export component FileTree inherits Rectangle {
+    in property <ThemeColors> theme;
     in-out property <string> selected-file;
     in property <[FileEntry]> files: [];
 
@@ -109,7 +113,7 @@ export component FileTree inherits Rectangle {
 
                 Text {
                     text: "Changed Files";
-                    color: Theme.text-primary;
+                    color: theme.text-primary;
                     font-size: 13px;
                     font-weight: 500;
                     vertical-alignment: center;
@@ -123,6 +127,7 @@ export component FileTree inherits Rectangle {
 
             VerticalLayout {
                 for file in files: TreeItem {
+                    theme: root.theme;
                     name: file.name;
                     path: file.path;
                     depth: file.depth;

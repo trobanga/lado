@@ -1,0 +1,621 @@
+import { ThemeColors } from "../theme.slint";
+
+// Settings data structure
+export struct AppSettings {
+    ui-theme: string,       // "dark", "light", "solarized-dark", "solarized-light"
+    syntax-theme: string,
+    font-size: int,
+    tab-width: int,
+    line-wrap: bool,
+}
+
+// Machined toggle switch with industrial aesthetic
+component ToggleSwitch inherits Rectangle {
+    in property <ThemeColors> theme;
+    in-out property <bool> checked: false;
+    in property <string> label;
+    callback toggled(bool);
+
+    height: 32px;
+
+    HorizontalLayout {
+        alignment: space-between;
+
+        Text {
+            text: root.label;
+            color: theme.text-secondary;
+            font-size: 12px;
+            vertical-alignment: center;
+            letter-spacing: 0.5px;
+        }
+
+        // Toggle track
+        Rectangle {
+            width: 44px;
+            height: 22px;
+            border-radius: 11px;
+            background: root.checked ? theme.status-added.with-alpha(0.3) : theme.bg-tertiary;
+            border-width: 1px;
+            border-color: root.checked ? theme.status-added.with-alpha(0.5) : theme.border-normal;
+
+            // Inner shadow effect
+            Rectangle {
+                x: 1px;
+                y: 1px;
+                width: parent.width - 2px;
+                height: parent.height - 2px;
+                border-radius: 10px;
+                background: root.checked ? theme.status-added.with-alpha(0.2) : theme.bg-tertiary;
+            }
+
+            // Toggle knob
+            Rectangle {
+                x: root.checked ? parent.width - self.width - 3px : 3px;
+                y: 3px;
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                background: theme.text-primary;
+                border-width: 1px;
+                border-color: theme.text-primary.with-alpha(0.5);
+
+                // Knob indicator dot
+                Rectangle {
+                    x: (parent.width - 4px) / 2;
+                    y: (parent.height - 4px) / 2;
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: root.checked ? theme.status-added : theme.text-muted;
+                }
+
+                animate x { duration: 150ms; easing: ease-out; }
+            }
+
+            TouchArea {
+                clicked => {
+                    root.checked = !root.checked;
+                    root.toggled(root.checked);
+                }
+            }
+        }
+    }
+}
+
+// Precision slider with tick marks
+component SettingsSlider inherits Rectangle {
+    in property <ThemeColors> theme;
+    in-out property <int> value: 13;
+    in property <int> minimum: 10;
+    in property <int> maximum: 20;
+    in property <string> label;
+    in property <string> unit: "px";
+    callback changed(int);
+
+    height: 56px;
+
+    VerticalLayout {
+        spacing: 8px;
+
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: root.label;
+                color: theme.text-secondary;
+                font-size: 12px;
+                letter-spacing: 0.5px;
+            }
+
+            // Value display - digital readout style
+            Rectangle {
+                width: 48px;
+                height: 20px;
+                background: theme.bg-primary;
+                border-radius: 3px;
+                border-width: 1px;
+                border-color: theme.border-normal;
+
+                Text {
+                    text: root.value + root.unit;
+                    color: theme.status-added;
+                    font-size: 11px;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Slider track
+        Rectangle {
+            height: 20px;
+
+            // Track background
+            Rectangle {
+                y: 8px;
+                height: 4px;
+                width: 100%;
+                border-radius: 2px;
+                background: theme.bg-primary;
+                border-width: 1px;
+                border-color: theme.border-subtle;
+
+                // Filled portion
+                Rectangle {
+                    width: (root.value - root.minimum) / (root.maximum - root.minimum) * parent.width;
+                    height: 100%;
+                    border-radius: 2px;
+                    background: theme.status-added.with-alpha(0.5);
+                }
+            }
+
+            // Tick marks
+            for tick in root.maximum - root.minimum + 1: Rectangle {
+                x: tick / (root.maximum - root.minimum) * (parent.width - 2px);
+                y: 16px;
+                width: 1px;
+                height: mod(tick, 5) == 0 ? 6px : 3px;
+                background: mod(tick, 5) == 0 ? theme.text-muted : theme.border-normal;
+            }
+
+            // Slider knob
+            Rectangle {
+                x: (root.value - root.minimum) / (root.maximum - root.minimum) * (parent.width - 16px);
+                y: 2px;
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                background: theme.bg-hover;
+                border-width: 1px;
+                border-color: theme.border-normal;
+
+                // Grip lines
+                Rectangle {
+                    x: 5px; y: 4px; width: 6px; height: 1px;
+                    background: theme.text-muted;
+                }
+                Rectangle {
+                    x: 5px; y: 7px; width: 6px; height: 1px;
+                    background: theme.text-muted;
+                }
+                Rectangle {
+                    x: 5px; y: 10px; width: 6px; height: 1px;
+                    background: theme.text-muted;
+                }
+            }
+
+            TouchArea {
+                moved => {
+                    if self.pressed {
+                        root.value = clamp(
+                            round(self.mouse-x / (self.width) * (root.maximum - root.minimum) + root.minimum),
+                            root.minimum,
+                            root.maximum
+                        );
+                        root.changed(root.value);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Segmented button group for discrete options
+component SegmentedControl inherits Rectangle {
+    in property <ThemeColors> theme;
+    in-out property <int> selected-index: 1;
+    in property <string> label;
+    in property <[string]> options: ["2", "4", "8"];
+    callback changed(int);
+
+    height: 56px;
+
+    VerticalLayout {
+        spacing: 8px;
+
+        Text {
+            text: root.label;
+            color: theme.text-secondary;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        Rectangle {
+            height: 28px;
+            background: theme.bg-primary;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: theme.border-normal;
+
+            HorizontalLayout {
+                padding: 2px;
+
+                for option[idx] in root.options: Rectangle {
+                    background: idx == root.selected-index ? theme.bg-hover : transparent;
+                    border-radius: 3px;
+                    border-width: idx == root.selected-index ? 1px : 0;
+                    border-color: theme.border-normal;
+
+                    Text {
+                        text: option;
+                        color: idx == root.selected-index ? theme.text-primary : theme.text-muted;
+                        font-size: 12px;
+                        font-weight: idx == root.selected-index ? 600 : 400;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.selected-index = idx;
+                            root.changed(idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Dropdown selector with industrial styling
+component DropdownSelect inherits Rectangle {
+    in property <ThemeColors> theme;
+    in-out property <int> selected-index: 0;
+    in-out property <bool> expanded: false;
+    in property <string> label;
+    in property <[string]> options: [];
+    callback changed(int);
+
+    height: root.expanded ? 56px + (root.options.length * 28px) + 8px : 56px;
+    clip: true;
+
+    animate height { duration: 200ms; easing: ease-out; }
+
+    VerticalLayout {
+        spacing: 8px;
+
+        Text {
+            text: root.label;
+            color: theme.text-secondary;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        // Selected value display
+        Rectangle {
+            height: 32px;
+            background: theme.bg-primary;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.expanded ? theme.accent-primary : theme.border-normal;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+
+                Text {
+                    text: root.options[root.selected-index];
+                    color: theme.text-primary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                // Chevron indicator
+                Rectangle {
+                    width: 20px;
+
+                    Text {
+                        text: root.expanded ? "▲" : "▼";
+                        color: theme.text-muted;
+                        font-size: 8px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            TouchArea {
+                clicked => {
+                    root.expanded = !root.expanded;
+                }
+            }
+        }
+
+        // Dropdown options
+        if root.expanded: Rectangle {
+            background: theme.bg-primary;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: theme.border-normal;
+
+            VerticalLayout {
+                padding: 4px;
+
+                for option[idx] in root.options: Rectangle {
+                    height: 28px;
+                    background: idx == root.selected-index ? theme.bg-selected : transparent;
+                    border-radius: 3px;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+
+                        Text {
+                            text: option;
+                            color: idx == root.selected-index ? theme.accent-primary : theme.text-secondary;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.selected-index = idx;
+                            root.expanded = false;
+                            root.changed(idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Settings section with etched border
+component SettingsSection inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <string> title;
+
+    background: transparent;
+    border-width: 1px;
+    border-color: theme.border-subtle;
+    border-radius: 6px;
+
+    // Top border accent
+    Rectangle {
+        y: 0;
+        x: 16px;
+        width: 40px;
+        height: 2px;
+        background: theme.accent-primary;
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 16px;
+
+        // Section header
+        Text {
+            text: root.title;
+            color: theme.text-primary;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+        }
+
+        @children
+    }
+}
+
+// Main settings panel - slides in from right
+export component SettingsPanel inherits Rectangle {
+    in property <ThemeColors> theme;
+    in-out property <bool> panel-visible: false;
+    in property <length> container-width: 1200px;
+    in-out property <AppSettings> settings: {
+        ui-theme: "dark",
+        syntax-theme: "base16-ocean.dark",
+        font-size: 13,
+        tab-width: 4,
+        line-wrap: false,
+    };
+
+    callback settings-changed(AppSettings);
+    callback close-panel();
+
+    // UI theme options mapping
+    property <[string]> ui-theme-options: ["Dark", "Light", "Solarized Dark", "Solarized Light"];
+    property <[string]> ui-theme-values: ["dark", "light", "solarized-dark", "solarized-light"];
+
+    // Syntax theme options
+    property <[string]> syntax-theme-options: [
+        "base16-ocean.dark",
+        "base16-eighties.dark",
+        "base16-mocha.dark",
+        "Solarized (dark)",
+        "InspiredGitHub",
+    ];
+
+    // Helper to get UI theme index
+    pure function get-ui-theme-index(theme-name: string) -> int {
+        if (theme-name == "dark") { return 0; }
+        if (theme-name == "light") { return 1; }
+        if (theme-name == "solarized-dark") { return 2; }
+        if (theme-name == "solarized-light") { return 3; }
+        return 0;
+    }
+
+    // Panel positioning and animation
+    x: root.panel-visible ? root.container-width - 320px : root.container-width;
+    width: 320px;
+    height: 100%;
+    background: theme.bg-secondary;
+
+    animate x { duration: 250ms; easing: ease-out; }
+
+    // Left edge shadow/border
+    Rectangle {
+        x: 0;
+        width: 1px;
+        height: 100%;
+        background: theme.border-subtle;
+    }
+    Rectangle {
+        x: 1px;
+        width: 1px;
+        height: 100%;
+        background: theme.border-normal;
+    }
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 20px;
+
+        // Panel header
+        HorizontalLayout {
+            height: 32px;
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                // Gear icon indicator
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 4px;
+                    background: theme.bg-tertiary;
+                    border-width: 1px;
+                    border-color: theme.border-normal;
+
+                    Text {
+                        text: "⚙";
+                        font-size: 12px;
+                        color: theme.text-muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: "SETTINGS";
+                    color: theme.text-primary;
+                    font-size: 13px;
+                    font-weight: 700;
+                    letter-spacing: 2px;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Close button
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: ta-close.has-hover ? theme.bg-hover : transparent;
+
+                Text {
+                    text: "✕";
+                    color: theme.text-muted;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                ta-close := TouchArea {
+                    clicked => {
+                        root.close-panel();
+                    }
+                }
+            }
+        }
+
+        // Scrollable settings content
+        Flickable {
+            viewport-height: 600px;
+
+            VerticalLayout {
+                spacing: 16px;
+
+                // Theme section
+                SettingsSection {
+                    theme: root.theme;
+                    title: "THEME";
+
+                    ui-theme-dropdown := DropdownSelect {
+                        theme: root.theme;
+                        label: "UI Theme";
+                        options: root.ui-theme-options;
+                        selected-index: root.get-ui-theme-index(root.settings.ui-theme);
+                        changed(idx) => {
+                            root.settings.ui-theme = root.ui-theme-values[idx];
+                            root.settings-changed(root.settings);
+                        }
+                    }
+                }
+
+                // Appearance section
+                SettingsSection {
+                    theme: root.theme;
+                    title: "CODE APPEARANCE";
+
+                    syntax-dropdown := DropdownSelect {
+                        theme: root.theme;
+                        label: "Syntax Theme";
+                        options: root.syntax-theme-options;
+                        selected-index: 0;
+                        changed(idx) => {
+                            root.settings.syntax-theme = self.options[idx];
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    slider := SettingsSlider {
+                        theme: root.theme;
+                        label: "Font Size";
+                        value: root.settings.font-size;
+                        minimum: 10;
+                        maximum: 20;
+                        unit: "px";
+                        changed(val) => {
+                            root.settings.font-size = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+                }
+
+                // Editor section
+                SettingsSection {
+                    theme: root.theme;
+                    title: "EDITOR";
+
+                    tabs := SegmentedControl {
+                        theme: root.theme;
+                        label: "Tab Width";
+                        options: ["2", "4", "8"];
+                        selected-index: root.settings.tab-width == 2 ? 0 :
+                                       root.settings.tab-width == 4 ? 1 : 2;
+                        changed(idx) => {
+                            root.settings.tab-width = idx == 0 ? 2 : idx == 1 ? 4 : 8;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    wrap := ToggleSwitch {
+                        theme: root.theme;
+                        label: "Line Wrapping";
+                        checked: root.settings.line-wrap;
+                        toggled(val) => {
+                            root.settings.line-wrap = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+                }
+
+                // Version info at bottom
+                Rectangle {
+                    height: 40px;
+
+                    Text {
+                        text: "lado v0.1.0";
+                        color: theme.text-muted;
+                        font-size: 10px;
+                        letter-spacing: 0.5px;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
