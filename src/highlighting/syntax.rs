@@ -1,17 +1,18 @@
 //! Syntax highlighting for diff content.
-//! This module will be integrated with the diff view for code coloring.
-
-#![allow(dead_code)]
 
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
+/// Maximum number of spans per line to prevent UI slowdown
+const MAX_SPANS_PER_LINE: usize = 50;
+
 /// Syntax highlighter using syntect
 pub struct SyntaxHighlighter {
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
+    current_theme: String,
 }
 
 impl SyntaxHighlighter {
@@ -19,24 +20,33 @@ impl SyntaxHighlighter {
         Self {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
+            current_theme: "base16-ocean.dark".to_string(),
+        }
+    }
+
+    /// Set the current theme by name
+    pub fn set_theme(&mut self, theme_name: &str) {
+        if self.theme_set.themes.contains_key(theme_name) {
+            self.current_theme = theme_name.to_string();
         }
     }
 
     /// Highlight a code snippet and return styled spans
     pub fn highlight(&self, code: &str, file_path: &str) -> Vec<HighlightedLine> {
-        let extension = file_path
-            .rsplit('.')
-            .next()
-            .unwrap_or("");
+        let extension = file_path.rsplit('.').next().unwrap_or("");
 
         let syntax = self
             .syntax_set
             .find_syntax_by_extension(extension)
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
-        let theme = &self.theme_set.themes["base16-ocean.dark"];
-        let mut highlighter = HighlightLines::new(syntax, theme);
+        let theme = self
+            .theme_set
+            .themes
+            .get(&self.current_theme)
+            .unwrap_or_else(|| &self.theme_set.themes["base16-ocean.dark"]);
 
+        let mut highlighter = HighlightLines::new(syntax, theme);
         let mut result = Vec::new();
 
         for line in LinesWithEndings::from(code) {
@@ -44,8 +54,10 @@ impl SyntaxHighlighter {
                 .highlight_line(line, &self.syntax_set)
                 .unwrap_or_default();
 
+            // Cap spans to prevent UI slowdown on very long lines
             let spans: Vec<HighlightedSpan> = ranges
                 .into_iter()
+                .take(MAX_SPANS_PER_LINE)
                 .map(|(style, text)| HighlightedSpan {
                     text: text.to_string(),
                     color: format!(
