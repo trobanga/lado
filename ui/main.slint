@@ -17,9 +17,13 @@ export component MainWindow inherits Window {
     default-font-family: "IBM Plex Sans";
     default-font-size: 13px;
 
-    // Theme property - dynamic, can be set from Rust
-    in-out property <ThemeColors> theme: ThemePresets.dark();
+    // Theme property - dynamic, derived from theme-name
     in-out property <string> theme-name: "dark";
+    in-out property <ThemeColors> theme:
+        theme-name == "light" ? ThemePresets.light() :
+        theme-name == "solarized-dark" ? ThemePresets.solarized-dark() :
+        theme-name == "solarized-light" ? ThemePresets.solarized-light() :
+        ThemePresets.dark();
 
     in-out property <bool> side-by-side-mode: false;
     in-out property <string> selected-file: "";
@@ -35,7 +39,16 @@ export component MainWindow inherits Window {
         font-size: 13,
         tab-width: 4,
         line-wrap: false,
+        key-unified: "u",
+        key-side-by-side: "s",
+        key-scroll-down: "j",
+        key-scroll-up: "k",
+        key-file-next: "J",
+        key-file-prev: "K",
+        key-prev-commit: "[",
+        key-next-commit: "]",
     };
+    in-out property <int> focused-index: 0;
 
     // Callbacks for Rust integration
     callback file-selected(string);
@@ -44,71 +57,152 @@ export component MainWindow inherits Window {
     callback commit-selected(int);
     callback settings-changed(AppSettings);
 
-    VerticalLayout {
-        // Toolbar
-        Toolbar {
-            theme: root.theme;
-            side-by-side: root.side-by-side-mode;
-            diff-title: root.diff-title;
-            toggle-view => {
-                root.side-by-side-mode = !root.side-by-side-mode;
-                root.toggle-view-mode();
+    // Scroll step for keyboard navigation
+    property <length> scroll-step: 60px;
+
+    // Global keyboard navigation
+    main-focus := FocusScope {
+        key-pressed(event) => {
+            // Skip keyboard navigation when settings panel is open
+            if (root.settings-visible) {
+                return reject;
             }
-            refresh => {
-                root.refresh-diff();
+
+            // DIFF SCROLLING (j/k)
+            if (event.text == root.app-settings.key-scroll-down) {
+                diff-view.scroll-position = diff-view.scroll-position + root.scroll-step;
+                return accept;
             }
-            open-settings => {
-                root.settings-visible = true;
+            if (event.text == root.app-settings.key-scroll-up) {
+                diff-view.scroll-position = max(0px, diff-view.scroll-position - root.scroll-step);
+                return accept;
             }
+
+            // FILE NAVIGATION (J/K - uppercase/shift)
+            if (event.text == root.app-settings.key-file-next) {
+                root.focused-index = min(root.focused-index + 1, root.files.length - 1);
+                if (!root.files[root.focused-index].is-folder) {
+                    root.selected-file = root.files[root.focused-index].path;
+                    root.file-selected(root.selected-file);
+                }
+                return accept;
+            }
+            if (event.text == root.app-settings.key-file-prev) {
+                root.focused-index = max(root.focused-index - 1, 0);
+                if (!root.files[root.focused-index].is-folder) {
+                    root.selected-file = root.files[root.focused-index].path;
+                    root.file-selected(root.selected-file);
+                }
+                return accept;
+            }
+
+            // COMMIT NAVIGATION ([ / ])
+            if (root.commits.length > 0) {
+                if (event.text == root.app-settings.key-prev-commit) {
+                    if (root.selected-commit-index >= 0) {
+                        root.selected-commit-index = root.selected-commit-index - 1;
+                        root.commit-selected(root.selected-commit-index);
+                    }
+                    return accept;
+                }
+                if (event.text == root.app-settings.key-next-commit) {
+                    if (root.selected-commit-index < root.commits.length - 1) {
+                        root.selected-commit-index = root.selected-commit-index + 1;
+                        root.commit-selected(root.selected-commit-index);
+                    }
+                    return accept;
+                }
+            }
+
+            if (event.text == Key.Return) {
+                if (root.focused-index >= 0 && root.focused-index < root.files.length) {
+                    if (!root.files[root.focused-index].is-folder) {
+                        root.selected-file = root.files[root.focused-index].path;
+                        root.file-selected(root.selected-file);
+                    }
+                }
+                return accept;
+            }
+            // Use configurable keybindings for view switching
+            if (event.text == root.app-settings.key-unified && root.side-by-side-mode) {
+                root.side-by-side-mode = false;
+                return accept;
+            }
+            if (event.text == root.app-settings.key-side-by-side && !root.side-by-side-mode) {
+                root.side-by-side-mode = true;
+                return accept;
+            }
+            reject
         }
 
-        // Main content area
-        HorizontalLayout {
-            vertical-stretch: 1;
-
-            // File tree panel
-            Rectangle {
-                width: 280px;
-                background: root.theme.bg-secondary;
-
-                Rectangle {
-                    x: parent.width - 1px;
-                    width: 1px;
-                    background: root.theme.border-subtle;
+        VerticalLayout {
+            // Toolbar
+            Toolbar {
+                theme: root.theme;
+                side-by-side: root.side-by-side-mode;
+                diff-title: root.diff-title;
+                toggle-view => {
+                    root.side-by-side-mode = !root.side-by-side-mode;
+                    root.toggle-view-mode();
                 }
-
-                VerticalLayout {
-                    // Commit list (collapsible, above file tree)
-                    CommitList {
-                        theme: root.theme;
-                        commits: root.commits;
-                        selected-index: root.selected-commit-index;
-                        commit-selected(idx) => {
-                            root.selected-commit-index = idx;
-                            root.commit-selected(idx);
-                        }
-                    }
-
-                    // File tree
-                    FileTree {
-                        theme: root.theme;
-                        selected-file: root.selected-file;
-                        files: root.files;
-                        file-clicked(path) => {
-                            root.selected-file = path;
-                            root.file-selected(path);
-                        }
-                    }
+                refresh => {
+                    root.refresh-diff();
+                }
+                open-settings => {
+                    root.settings-visible = true;
                 }
             }
 
-            // Diff view area
-            DiffView {
-                theme: root.theme;
-                side-by-side: root.side-by-side-mode;
-                selected-file: root.selected-file;
-                lines: root.lines;
-                font-size: root.app-settings.font-size * 1px;
+            // Main content area
+            HorizontalLayout {
+                vertical-stretch: 1;
+
+                // File tree panel
+                Rectangle {
+                    width: 280px;
+                    background: root.theme.bg-secondary;
+
+                    Rectangle {
+                        x: parent.width - 1px;
+                        width: 1px;
+                        background: root.theme.border-subtle;
+                    }
+
+                    VerticalLayout {
+                        // Commit list (collapsible, above file tree)
+                        CommitList {
+                            theme: root.theme;
+                            commits: root.commits;
+                            selected-index: root.selected-commit-index;
+                            commit-selected(idx) => {
+                                root.selected-commit-index = idx;
+                                root.commit-selected(idx);
+                            }
+                        }
+
+                        // File tree
+                        FileTree {
+                            theme: root.theme;
+                            selected-file: root.selected-file;
+                            files: root.files;
+                            focused-index: root.focused-index;
+                            file-clicked(path) => {
+                                root.selected-file = path;
+                                root.file-selected(path);
+                            }
+                        }
+                    }
+                }
+
+                // Diff view area
+                diff-view := DiffView {
+                    theme: root.theme;
+                    side-by-side: root.side-by-side-mode;
+                    selected-file: root.selected-file;
+                    lines: root.lines;
+                    font-size: root.app-settings.font-size * 1px;
+                    scroll-step: root.scroll-step;
+                }
             }
         }
     }
