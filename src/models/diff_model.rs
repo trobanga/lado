@@ -1,5 +1,8 @@
 use crate::git::{DiffLine, DiffLineType};
+use crate::models::TextSpanModel;
 use crate::DiffLine as SlintDiffLine;
+use crate::TextSpan as SlintTextSpan;
+use slint::ModelRc;
 
 /// Model for a diff line in the UI
 pub struct DiffLineModel {
@@ -7,6 +10,7 @@ pub struct DiffLineModel {
     pub old_line_num: String,
     pub new_line_num: String,
     pub content: String,
+    pub spans: Vec<TextSpanModel>,
     // Comment fields
     pub comment_author: String,
     pub comment_body: String,
@@ -45,6 +49,7 @@ impl From<&DiffLine> for DiffLineModel {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             content: line.content.clone(),
+            spans: Vec::new(), // Spans populated later by highlighter
             comment_author: author,
             comment_body: body,
             comment_timestamp: timestamp,
@@ -55,11 +60,20 @@ impl From<&DiffLine> for DiffLineModel {
 
 impl From<DiffLineModel> for SlintDiffLine {
     fn from(model: DiffLineModel) -> Self {
+        // Convert spans to Slint model
+        let slint_spans: Vec<SlintTextSpan> = model
+            .spans
+            .into_iter()
+            .map(SlintTextSpan::from)
+            .collect();
+        let spans_model = ModelRc::new(slint::VecModel::from(slint_spans));
+
         Self {
             line_type: model.line_type.into(),
             old_line_num: model.old_line_num.into(),
             new_line_num: model.new_line_num.into(),
             content: model.content.into(),
+            spans: spans_model,
             comment_author: model.comment_author.into(),
             comment_body: model.comment_body.into(),
             comment_timestamp: model.comment_timestamp.into(),
