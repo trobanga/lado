@@ -28,6 +28,16 @@ impl App {
         let repo = Rc::new(Repository::open_current_dir()?);
         let target = DiffTarget::parse(args.target.as_deref());
 
+        // Load persisted settings
+        let config = crate::config::load();
+        window.set_app_settings(crate::AppSettings {
+            ui_theme: config.ui_theme.clone().into(),
+            syntax_theme: config.syntax_theme.clone().into(),
+            font_size: config.font_size,
+            tab_width: config.tab_width,
+            line_wrap: config.line_wrap,
+        });
+
         // Set the diff title based on target
         let diff_title = match &target {
             DiffTarget::DefaultBranch => {
@@ -199,6 +209,18 @@ impl App {
         let diff_data = Rc::clone(&self.diff_data);
         let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_settings_changed(move |settings| {
+            // Persist settings to config file
+            let config = crate::config::Config {
+                ui_theme: settings.ui_theme.to_string(),
+                syntax_theme: settings.syntax_theme.to_string(),
+                font_size: settings.font_size,
+                tab_width: settings.tab_width,
+                line_wrap: settings.line_wrap,
+            };
+            if let Err(e) = crate::config::save(&config) {
+                eprintln!("Warning: Could not save settings: {}", e);
+            }
+
             // Map UI theme to syntax theme if needed
             let syntax_theme = match settings.ui_theme.as_str() {
                 "light" => "InspiredGitHub".to_string(),
