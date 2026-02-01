@@ -76,6 +76,7 @@ Uses [beads](https://github.com/steveyegge/beads) for distributed issue tracking
 bd list                              # View all issues
 bd ready                             # View ready-to-work issues
 bd show diff-xxx                     # View issue details
+bd create "Title" --description "..." --priority 2  # Create issue
 bd update diff-xxx --status in-progress  # Start work
 bd close diff-xxx                    # Complete issue
 bd sync                              # Commit and push changes
