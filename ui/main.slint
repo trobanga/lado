@@ -12,8 +12,10 @@ export { FileEntry, DiffLine, PrCommitEntry, TextSpan, AppSettings, ThemeColors 
 export component MainWindow inherits Window {
     title: "lado";
     background: root.theme.bg-primary;
-    min-width: 1200px;
-    min-height: 700px;
+    preferred-width: 1400px;
+    preferred-height: 900px;
+    min-width: 800px;
+    min-height: 600px;
     default-font-family: "IBM Plex Sans";
     default-font-size: 13px;
 
@@ -160,6 +162,7 @@ export component MainWindow inherits Window {
                 // File tree panel
                 Rectangle {
                     width: 280px;
+                    vertical-stretch: 1;
                     background: root.theme.bg-secondary;
 
                     Rectangle {
@@ -196,6 +199,8 @@ export component MainWindow inherits Window {
 
                 // Diff view area
                 diff-view := DiffView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;

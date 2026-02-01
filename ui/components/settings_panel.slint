@@ -7,6 +7,15 @@ export struct AppSettings {
     font-size: int,
     tab-width: int,
     line-wrap: bool,
+    // Keybindings
+    key-unified: string,      // default: "u"
+    key-side-by-side: string, // default: "s"
+    key-scroll-down: string,  // default: "j"
+    key-scroll-up: string,    // default: "k"
+    key-file-next: string,    // default: "J"
+    key-file-prev: string,    // default: "K"
+    key-prev-commit: string,  // default: "["
+    key-next-commit: string,  // default: "]"
 }
 
 // Machined toggle switch with industrial aesthetic
@@ -362,6 +371,69 @@ component DropdownSelect inherits Rectangle {
     }
 }
 
+// Keybind capture component for capturing key presses
+component KeybindCapture inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <string> label;
+    in-out property <string> value: "";
+    property <bool> capturing: false;
+    callback changed(string);
+
+    height: 32px;
+
+    HorizontalLayout {
+        alignment: space-between;
+
+        Text {
+            text: root.label;
+            color: theme.text-secondary;
+            font-size: 12px;
+            vertical-alignment: center;
+            letter-spacing: 0.5px;
+        }
+
+        Rectangle {
+            width: 64px;
+            height: 28px;
+            background: theme.bg-primary;
+            border-radius: 4px;
+            border-width: root.capturing ? 2px : 1px;
+            border-color: root.capturing ? theme.accent-primary : theme.border-normal;
+
+            fs := FocusScope {
+                key-pressed(event) => {
+                    if (root.capturing) {
+                        // Capture single printable keys (ignore modifiers, arrows, etc.)
+                        if (event.text.character-count == 1) {
+                            root.value = event.text;
+                            root.capturing = false;
+                            root.changed(root.value);
+                            return accept;
+                        }
+                    }
+                    reject
+                }
+            }
+
+            Text {
+                text: root.capturing ? "Press key..." : root.value;
+                color: root.capturing ? theme.text-muted : theme.text-primary;
+                font-size: 12px;
+                font-weight: root.capturing ? 400 : 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                clicked => {
+                    root.capturing = true;
+                    fs.focus();
+                }
+            }
+        }
+    }
+}
+
 // Settings section with etched border
 component SettingsSection inherits Rectangle {
     in property <ThemeColors> theme;
@@ -409,6 +481,14 @@ export component SettingsPanel inherits Rectangle {
         font-size: 13,
         tab-width: 4,
         line-wrap: false,
+        key-unified: "u",
+        key-side-by-side: "s",
+        key-scroll-down: "j",
+        key-scroll-up: "k",
+        key-file-next: "J",
+        key-file-prev: "K",
+        key-prev-commit: "[",
+        key-next-commit: "]",
     };
 
     callback settings-changed(AppSettings);
@@ -523,7 +603,7 @@ export component SettingsPanel inherits Rectangle {
 
         // Scrollable settings content
         Flickable {
-            viewport-height: 600px;
+            viewport-height: 850px;
 
             VerticalLayout {
                 spacing: 16px;
@@ -598,6 +678,92 @@ export component SettingsPanel inherits Rectangle {
                         checked: root.settings.line-wrap;
                         toggled(val) => {
                             root.settings.line-wrap = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+                }
+
+                // Keybindings section
+                SettingsSection {
+                    theme: root.theme;
+                    title: "KEYBINDINGS";
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Unified View";
+                        value: root.settings.key-unified;
+                        changed(val) => {
+                            root.settings.key-unified = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Side-by-Side View";
+                        value: root.settings.key-side-by-side;
+                        changed(val) => {
+                            root.settings.key-side-by-side = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Scroll Down";
+                        value: root.settings.key-scroll-down;
+                        changed(val) => {
+                            root.settings.key-scroll-down = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Scroll Up";
+                        value: root.settings.key-scroll-up;
+                        changed(val) => {
+                            root.settings.key-scroll-up = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Next File";
+                        value: root.settings.key-file-next;
+                        changed(val) => {
+                            root.settings.key-file-next = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Previous File";
+                        value: root.settings.key-file-prev;
+                        changed(val) => {
+                            root.settings.key-file-prev = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Previous Commit";
+                        value: root.settings.key-prev-commit;
+                        changed(val) => {
+                            root.settings.key-prev-commit = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Next Commit";
+                        value: root.settings.key-next-commit;
+                        changed(val) => {
+                            root.settings.key-next-commit = val;
                             root.settings-changed(root.settings);
                         }
                     }

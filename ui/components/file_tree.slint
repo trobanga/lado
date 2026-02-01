@@ -24,13 +24,17 @@ component TreeItem inherits Rectangle {
     in property <bool> is-expanded: true;
     in property <string> status: "modified";
     in property <bool> selected: false;
+    in property <bool> focused: false;
 
     callback clicked;
     callback toggle-expand;
 
     height: 28px;
     background: selected ? theme.bg-selected :
+                focused ? theme.bg-hover :
                 (touch.has-hover ? theme.bg-hover : transparent);
+    border-width: focused && !selected ? 1px : 0;
+    border-color: theme.accent-primary;
 
     HorizontalLayout {
         padding-left: 12px + (depth * 16px);
@@ -94,6 +98,7 @@ export component FileTree inherits Rectangle {
     in property <ThemeColors> theme;
     in-out property <string> selected-file;
     in property <[FileEntry]> files: [];
+    in property <int> focused-index: -1;
 
     callback file-clicked(string);
 
@@ -123,10 +128,11 @@ export component FileTree inherits Rectangle {
 
         // File list
         Flickable {
+            vertical-stretch: 1;
             viewport-height: files.length * 28px;
 
             VerticalLayout {
-                for file in files: TreeItem {
+                for file[idx] in files: TreeItem {
                     theme: root.theme;
                     name: file.name;
                     path: file.path;
@@ -135,6 +141,7 @@ export component FileTree inherits Rectangle {
                     is-expanded: file.is-expanded;
                     status: file.status;
                     selected: file.path == selected-file;
+                    focused: idx == root.focused-index;
 
                     clicked => {
                         if (!file.is-folder) {

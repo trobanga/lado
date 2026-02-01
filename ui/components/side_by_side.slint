@@ -202,12 +202,18 @@ export component SideBySideView inherits Rectangle {
     in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
     in property <length> font-size: 13px;
+    in-out property <length> scroll-position: 0;
+    in property <length> scroll-step: 60px;
+
+    // Internal property for two-way binding with flickables
+    property <length> internal-viewport-y: -root.scroll-position;
 
     background: theme.bg-primary;
 
     HorizontalLayout {
         // Left panel (old file)
         Rectangle {
+            horizontal-stretch: 1;
             background: theme.bg-primary;
 
             // Panel header
@@ -237,10 +243,11 @@ export component SideBySideView inherits Rectangle {
             }
 
             // Left diff content
-            Flickable {
+            left-flickable := Flickable {
                 y: 32px;
                 height: parent.height - 32px;
                 viewport-width: max(self.width, 1000px);
+                viewport-y <=> root.internal-viewport-y;
 
                 VerticalLayout {
                     for line in lines: LeftLineItem {
@@ -261,6 +268,7 @@ export component SideBySideView inherits Rectangle {
 
         // Right panel (new file)
         Rectangle {
+            horizontal-stretch: 1;
             background: theme.bg-primary;
 
             // Panel header
@@ -290,10 +298,11 @@ export component SideBySideView inherits Rectangle {
             }
 
             // Right diff content
-            Flickable {
+            right-flickable := Flickable {
                 y: 32px;
                 height: parent.height - 32px;
                 viewport-width: max(self.width, 1000px);
+                viewport-y <=> root.internal-viewport-y;
 
                 VerticalLayout {
                     for line in lines: RightLineItem {
@@ -305,5 +314,15 @@ export component SideBySideView inherits Rectangle {
                 }
             }
         }
+    }
+
+    // Sync scroll-position when internal-viewport-y changes (user scrolling)
+    changed internal-viewport-y => {
+        root.scroll-position = -root.internal-viewport-y;
+    }
+
+    // Sync internal-viewport-y when scroll-position changes (keyboard nav)
+    changed scroll-position => {
+        root.internal-viewport-y = -root.scroll-position;
     }
 }

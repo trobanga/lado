@@ -14,6 +14,15 @@ pub struct Config {
     pub font_size: i32,
     pub tab_width: i32,
     pub line_wrap: bool,
+    // Keybindings
+    pub key_unified: String,
+    pub key_side_by_side: String,
+    pub key_scroll_down: String,
+    pub key_scroll_up: String,
+    pub key_file_next: String,
+    pub key_file_prev: String,
+    pub key_prev_commit: String,
+    pub key_next_commit: String,
 }
 
 impl Default for Config {
@@ -24,6 +33,14 @@ impl Default for Config {
             font_size: 14,
             tab_width: 4,
             line_wrap: false,
+            key_unified: "u".to_string(),
+            key_side_by_side: "s".to_string(),
+            key_scroll_down: "j".to_string(),
+            key_scroll_up: "k".to_string(),
+            key_file_next: "J".to_string(),
+            key_file_prev: "K".to_string(),
+            key_prev_commit: "[".to_string(),
+            key_next_commit: "]".to_string(),
         }
     }
 }
@@ -86,6 +103,14 @@ mod tests {
             font_size: 16,
             tab_width: 2,
             line_wrap: true,
+            key_unified: "u".to_string(),
+            key_side_by_side: "s".to_string(),
+            key_scroll_down: "j".to_string(),
+            key_scroll_up: "k".to_string(),
+            key_file_next: "J".to_string(),
+            key_file_prev: "K".to_string(),
+            key_prev_commit: "[".to_string(),
+            key_next_commit: "]".to_string(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();

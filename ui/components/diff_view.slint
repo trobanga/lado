@@ -9,8 +9,19 @@ export component DiffView inherits Rectangle {
     in property <string> selected-file;
     in property <[DiffLine]> lines: [];
     in property <length> font-size: 13px;
+    in-out property <length> scroll-position: 0;
+    in property <length> scroll-step: 60px;
 
     background: theme.bg-primary;
+
+    // Reset scroll when file changes
+    property <string> prev-selected-file: "";
+    changed selected-file => {
+        if (root.selected-file != root.prev-selected-file) {
+            root.scroll-position = 0;
+            root.prev-selected-file = root.selected-file;
+        }
+    }
 
     if selected-file == "": Rectangle {
         // Empty state
@@ -30,11 +41,15 @@ export component DiffView inherits Rectangle {
         theme: root.theme;
         lines: root.lines;
         font-size: root.font-size;
+        scroll-position <=> root.scroll-position;
+        scroll-step: root.scroll-step;
     }
 
     if selected-file != "" && side-by-side: SideBySideView {
         theme: root.theme;
         lines: root.lines;
         font-size: root.font-size;
+        scroll-position <=> root.scroll-position;
+        scroll-step: root.scroll-step;
     }
 }

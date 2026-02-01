@@ -191,13 +191,16 @@ export component UnifiedView inherits Rectangle {
     in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
     in property <length> font-size: 13px;
+    in-out property <length> scroll-position: 0;
+    in property <length> scroll-step: 60px;
 
     background: theme.bg-primary;
 
-    Flickable {
+    flickable := Flickable {
         width: 100%;
         height: 100%;
         viewport-width: max(self.width, 2000px);
+        viewport-y <=> root.internal-viewport-y;
 
         VerticalLayout {
             for line in lines: LineItem {
@@ -207,5 +210,18 @@ export component UnifiedView inherits Rectangle {
                 width: parent.width;
             }
         }
+    }
+
+    // Internal property for two-way binding with flickable
+    property <length> internal-viewport-y: -root.scroll-position;
+
+    // Sync scroll-position when internal-viewport-y changes (user scrolling)
+    changed internal-viewport-y => {
+        root.scroll-position = -root.internal-viewport-y;
+    }
+
+    // Sync internal-viewport-y when scroll-position changes (keyboard nav)
+    changed scroll-position => {
+        root.internal-viewport-y = -root.scroll-position;
     }
 }
