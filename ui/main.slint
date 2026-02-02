@@ -14,6 +14,7 @@ export component MainWindow inherits Window {
     background: root.theme.bg-primary;
     min-width: 800px;
     min-height: 600px;
+    preferred-width: 1200px;
     default-font-family: "IBM Plex Sans";
     default-font-size: 13px;
 
@@ -56,6 +57,7 @@ export component MainWindow inherits Window {
     callback refresh-diff();
     callback commit-selected(int);
     callback settings-changed(AppSettings);
+    callback toggle-fullscreen();
 
     init => {
         main-focus.focus();
@@ -66,10 +68,14 @@ export component MainWindow inherits Window {
 
     // Global keyboard navigation
     main-focus := FocusScope {
-        width: 100%;
-        height: 100%;
 
         key-pressed(event) => {
+            // F11 toggles fullscreen (works even with settings open)
+            if (event.text == Key.F11) {
+                root.toggle-fullscreen();
+                return accept;
+            }
+
             // Skip keyboard navigation when settings panel is open
             if (root.settings-visible) {
                 return reject;
@@ -143,9 +149,6 @@ export component MainWindow inherits Window {
         }
 
         VerticalLayout {
-            width: 100%;
-            height: 100%;
-
             // Toolbar
             Toolbar {
                 theme: root.theme;
@@ -166,12 +169,13 @@ export component MainWindow inherits Window {
             // Main content area
             HorizontalLayout {
                 vertical-stretch: 1;
-                height: 100%;
+                min-height: 10000px;
 
                 // File tree panel
                 Rectangle {
                     width: 280px;
-                    height: 100%;
+                    vertical-stretch: 1;
+                    clip: true;
                     background: root.theme.bg-secondary;
 
                     Rectangle {
@@ -181,8 +185,6 @@ export component MainWindow inherits Window {
                     }
 
                     VerticalLayout {
-                        height: 100%;
-
                         // Commit list (collapsible, above file tree)
                         CommitList {
                             theme: root.theme;
@@ -212,7 +214,7 @@ export component MainWindow inherits Window {
                 // Diff view area
                 diff-view := DiffView {
                     horizontal-stretch: 1;
-                    height: 100%;
+                    vertical-stretch: 1;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;

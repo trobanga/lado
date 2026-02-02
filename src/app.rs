@@ -106,6 +106,13 @@ impl App {
         });
 
         let window_weak = self.window.as_weak();
+        self.window.on_toggle_fullscreen(move || {
+            let window = window_weak.unwrap();
+            let is_fullscreen = window.window().is_fullscreen();
+            window.window().set_fullscreen(!is_fullscreen);
+        });
+
+        let window_weak = self.window.as_weak();
         self.window.on_refresh_diff(move || {
             let _window = window_weak.unwrap();
             println!("Refresh diff");
