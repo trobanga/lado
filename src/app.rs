@@ -59,6 +59,16 @@ impl App {
         };
         window.set_diff_title(diff_title.into());
 
+        // Initialize syntax highlighter with theme matching UI theme
+        let mut highlighter = SyntaxHighlighter::new();
+        let syntax_theme = match config.ui_theme.as_str() {
+            "light" => "InspiredGitHub",
+            "solarized-light" => "Solarized (light)",
+            "solarized-dark" => "Solarized (dark)",
+            _ => "base16-ocean.dark",
+        };
+        highlighter.set_theme(syntax_theme);
+
         let app = Self {
             window,
             repo,
@@ -69,7 +79,7 @@ impl App {
             all_pr_comments: Rc::new(RefCell::new(Vec::new())),
             pr_base_ref: Rc::new(RefCell::new(None)),
             pr_head_ref: Rc::new(RefCell::new(None)),
-            highlighter: Rc::new(RefCell::new(SyntaxHighlighter::new())),
+            highlighter: Rc::new(RefCell::new(highlighter)),
         };
 
         app.setup_callbacks()?;

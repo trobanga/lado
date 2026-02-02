@@ -143,98 +143,106 @@ export global ThemePresets {
     }
 
     // Solarized Dark theme
+    // Official palette: base03=#002b36, base02=#073642, base01=#586e75, base00=#657b83
+    //                   base0=#839496, base1=#93a1a1, base2=#eee8d5, base3=#fdf6e3
+    // Accents: yellow=#b58900, orange=#cb4b16, red=#dc322f, magenta=#d33682
+    //          violet=#6c71c4, blue=#268bd2, cyan=#2aa198, green=#859900
     pure public function solarized-dark() -> ThemeColors {
         return {
-            // Base colors (Solarized base03-base00)
-            bg-primary: #002b36,
-            bg-secondary: #073642,
-            bg-tertiary: #0a4050,
-            bg-hover: #0d4d5e,
-            bg-selected: #124e5f,
+            // Base colors (dark mode uses base03/base02 for backgrounds)
+            bg-primary: #002b36,    // base03 - main background
+            bg-secondary: #073642,  // base02 - highlighted background
+            bg-tertiary: #073642,   // base02 - (Solarized has limited bg options)
+            bg-hover: #073642,      // base02
+            bg-selected: #073642,   // base02
 
-            // Border colors
-            border-subtle: #0d4d5e,
-            border-normal: #2a5f6e,
+            // Border colors (using base01 and base00)
+            border-subtle: #586e75, // base01
+            border-normal: #657b83, // base00
 
-            // Text colors (Solarized base0-base1)
-            text-primary: #93a1a1,
-            text-secondary: #839496,
-            text-muted: #657b83,
+            // Text colors (dark mode uses base0/base1 for text)
+            text-primary: #839496,  // base0 - body text
+            text-secondary: #93a1a1, // base1 - emphasized/secondary
+            text-muted: #586e75,    // base01 - comments/muted
 
-            // Diff colors
-            diff-add-bg: #003d1c,
-            diff-add-text: #859900,
-            diff-add-gutter: #004d23,
-            diff-remove-bg: #3d0011,
-            diff-remove-text: #dc322f,
-            diff-remove-gutter: #4d0016,
-            diff-context-bg: #002b36,
-            diff-hunk-bg: #003847,
-            diff-hunk-text: #268bd2,
+            // Diff colors (green/red tinted backgrounds blended with base03)
+            diff-add-bg: #073626,       // base03 + green tint
+            diff-add-text: #859900,     // green
+            diff-add-gutter: #0a4030,   // slightly stronger green tint for gutter
+            diff-remove-bg: #30262a,    // base03 + red tint
+            diff-remove-text: #dc322f,  // red
+            diff-remove-gutter: #3a2830, // slightly stronger red tint for gutter
+            diff-context-bg: #002b36,   // base03
+            diff-hunk-bg: #073642,      // base02
+            diff-hunk-text: #268bd2,    // blue
 
             // Accent colors (Solarized blue/cyan)
-            accent-primary: #268bd2,
-            accent-secondary: #2aa198,
+            accent-primary: #268bd2,  // blue
+            accent-secondary: #2aa198, // cyan
 
             // Status colors
-            status-added: #859900,
-            status-modified: #b58900,
-            status-deleted: #dc322f,
+            status-added: #859900,    // green
+            status-modified: #b58900, // yellow
+            status-deleted: #dc322f,  // red
 
             // Comment colors
-            comment-bg: #073642,
-            comment-border: #2a5f6e,
-            comment-author: #268bd2,
-            comment-body: #93a1a1,
-            comment-timestamp: #657b83,
+            comment-bg: #073642,      // base02
+            comment-border: #586e75,  // base01
+            comment-author: #268bd2,  // blue
+            comment-body: #839496,    // base0
+            comment-timestamp: #586e75, // base01
         };
     }
 
     // Solarized Light theme
+    // Official palette: base3=#fdf6e3, base2=#eee8d5, base1=#93a1a1, base0=#839496
+    //                   base00=#657b83, base01=#586e75, base02=#073642, base03=#002b36
+    // Accents: yellow=#b58900, orange=#cb4b16, red=#dc322f, magenta=#d33682
+    //          violet=#6c71c4, blue=#268bd2, cyan=#2aa198, green=#859900
     pure public function solarized-light() -> ThemeColors {
         return {
-            // Base colors (Solarized base3-base2)
-            bg-primary: #fdf6e3,
-            bg-secondary: #eee8d5,
-            bg-tertiary: #e5ddc8,
-            bg-hover: #ddd5c0,
-            bg-selected: #d5ccb8,
+            // Base colors (light mode uses base3/base2 for backgrounds)
+            bg-primary: #fdf6e3,    // base3 - main background
+            bg-secondary: #eee8d5,  // base2 - highlighted background
+            bg-tertiary: #eee8d5,   // base2 - (Solarized has limited bg options)
+            bg-hover: #eee8d5,      // base2
+            bg-selected: #eee8d5,   // base2
 
-            // Border colors
-            border-subtle: #e0d8c3,
-            border-normal: #c9c0ab,
+            // Border colors (using base1 which is emphasized content in light mode)
+            border-subtle: #93a1a1, // base1
+            border-normal: #839496, // base0
 
-            // Text colors (Solarized base00-base01)
-            text-primary: #657b83,
-            text-secondary: #839496,
-            text-muted: #93a1a1,
+            // Text colors (light mode uses base00/base01 for text)
+            text-primary: #657b83,  // base00 - body text
+            text-secondary: #586e75, // base01 - emphasized/secondary
+            text-muted: #93a1a1,    // base1 - comments/muted
 
-            // Diff colors
-            diff-add-bg: #e6f4e3,
-            diff-add-text: #657b00,
-            diff-add-gutter: #d6ecd1,
-            diff-remove-bg: #fbe8e5,
-            diff-remove-text: #b5211c,
-            diff-remove-gutter: #f7d5d0,
-            diff-context-bg: #fdf6e3,
-            diff-hunk-bg: #f3ecd5,
-            diff-hunk-text: #268bd2,
+            // Diff colors (green/red tinted backgrounds blended with base3)
+            diff-add-bg: #e4f0d0,       // base3 + green tint
+            diff-add-text: #859900,     // green
+            diff-add-gutter: #d8e8c0,   // slightly stronger green tint for gutter
+            diff-remove-bg: #fce8e4,    // base3 + red tint
+            diff-remove-text: #dc322f,  // red
+            diff-remove-gutter: #f8d8d4, // slightly stronger red tint for gutter
+            diff-context-bg: #fdf6e3,   // base3
+            diff-hunk-bg: #eee8d5,      // base2
+            diff-hunk-text: #268bd2,    // blue
 
             // Accent colors (Solarized blue/cyan)
-            accent-primary: #268bd2,
-            accent-secondary: #2aa198,
+            accent-primary: #268bd2, // blue
+            accent-secondary: #2aa198, // cyan
 
             // Status colors
-            status-added: #859900,
-            status-modified: #b58900,
-            status-deleted: #dc322f,
+            status-added: #859900,   // green
+            status-modified: #b58900, // yellow
+            status-deleted: #dc322f, // red
 
             // Comment colors
-            comment-bg: #eee8d5,
-            comment-border: #c9c0ab,
-            comment-author: #268bd2,
-            comment-body: #657b83,
-            comment-timestamp: #93a1a1,
+            comment-bg: #eee8d5,     // base2
+            comment-border: #93a1a1, // base1
+            comment-author: #268bd2, // blue
+            comment-body: #657b83,   // base00
+            comment-timestamp: #93a1a1, // base1
         };
     }
 }
