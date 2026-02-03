@@ -36,6 +36,15 @@ component TreeItem inherits Rectangle {
     border-width: focused && !selected ? 1px : 0;
     border-color: theme.accent-primary;
 
+    // Selection indicator bar on left edge
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: selected ? 3px : 0;
+        height: parent.height;
+        background: theme.accent-primary;
+    }
+
     HorizontalLayout {
         padding-left: 12px + (depth * 16px);
         padding-right: 12px;
@@ -100,7 +109,7 @@ export component FileTree inherits Rectangle {
     in property <[FileEntry]> files: [];
     in property <int> focused-index: -1;
 
-    callback file-clicked(string);
+    callback file-clicked(/* path */ string, /* index */ int);
 
     background: transparent;
 
@@ -145,7 +154,7 @@ export component FileTree inherits Rectangle {
 
                     clicked => {
                         if (!file.is-folder) {
-                            root.file-clicked(file.path);
+                            root.file-clicked(file.path, idx);
                         }
                     }
                 }

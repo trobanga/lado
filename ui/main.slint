@@ -202,8 +202,9 @@ export component MainWindow inherits Window {
                             selected-file: root.selected-file;
                             files: root.files;
                             focused-index: root.focused-index;
-                            file-clicked(path) => {
+                            file-clicked(path, idx) => {
                                 root.selected-file = path;
+                                root.focused-index = idx;
                                 root.file-selected(path);
                             }
                         }
