@@ -99,7 +99,13 @@ component TreeItem inherits Rectangle {
 
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            if (root.is-folder) {
+                root.toggle-expand();
+            } else {
+                root.clicked();
+            }
+        }
     }
 }
 
