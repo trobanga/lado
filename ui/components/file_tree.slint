@@ -110,6 +110,7 @@ export component FileTree inherits Rectangle {
     in property <int> focused-index: -1;
 
     callback file-clicked(/* path */ string, /* index */ int);
+    callback folder-toggled(/* path */ string);
 
     background: transparent;
 
@@ -156,6 +157,10 @@ export component FileTree inherits Rectangle {
                         if (!file.is-folder) {
                             root.file-clicked(file.path, idx);
                         }
+                    }
+
+                    toggle-expand => {
+                        root.folder-toggled(file.path);
                     }
                 }
             }

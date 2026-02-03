@@ -53,6 +53,7 @@ export component MainWindow inherits Window {
 
     // Callbacks for Rust integration
     callback file-selected(string);
+    callback folder-toggled(string);
     callback toggle-view-mode();
     callback refresh-diff();
     callback commit-selected(int);
@@ -206,6 +207,9 @@ export component MainWindow inherits Window {
                                 root.selected-file = path;
                                 root.focused-index = idx;
                                 root.file-selected(path);
+                            }
+                            folder-toggled(path) => {
+                                root.folder-toggled(path);
                             }
                         }
                     }

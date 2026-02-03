@@ -85,22 +85,35 @@ fn sort_tree(nodes: &mut [FileTreeNode]) {
     }
 }
 
-/// Flatten the file tree for display in a ListView
-pub fn flatten_tree(nodes: &[FileTreeNode], depth: i32) -> Vec<FlatFileEntry> {
+/// Flatten the file tree with explicit expanded state for each folder
+/// The expanded_state map uses folder paths as keys, with true = expanded (default), false = collapsed
+pub fn flatten_tree_with_state(
+    nodes: &[FileTreeNode],
+    depth: i32,
+    expanded_state: &std::collections::HashMap<String, bool>,
+) -> Vec<FlatFileEntry> {
     let mut result = Vec::new();
 
     for node in nodes {
+        // For folders, check if they're expanded (default to true if not in map)
+        let is_expanded = if node.is_folder {
+            *expanded_state.get(&node.path).unwrap_or(&true)
+        } else {
+            true
+        };
+
         result.push(FlatFileEntry {
             name: node.name.clone(),
             path: node.path.clone(),
             depth,
             is_folder: node.is_folder,
-            is_expanded: true,
+            is_expanded,
             status: node.status.clone().unwrap_or_else(|| "modified".to_string()),
         });
 
-        if node.is_folder {
-            result.extend(flatten_tree(&node.children, depth + 1));
+        // Only recurse into children if the folder is expanded
+        if node.is_folder && is_expanded {
+            result.extend(flatten_tree_with_state(&node.children, depth + 1, expanded_state));
         }
     }
 
@@ -155,5 +168,47 @@ mod tests {
         assert!(tree[0].is_folder);
         assert_eq!(tree[0].name, "src");
         assert_eq!(tree[0].children.len(), 2);
+    }
+
+    #[test]
+    fn test_flatten_tree_respects_expanded_state() {
+        let files = vec![
+            FileChange {
+                path: "src/main.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 10,
+                deletions: 5,
+            },
+            FileChange {
+                path: "src/lib.rs".to_string(),
+                status: FileStatus::Added,
+                additions: 20,
+                deletions: 0,
+            },
+            FileChange {
+                path: "README.md".to_string(),
+                status: FileStatus::Modified,
+                additions: 2,
+                deletions: 1,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        // When all expanded, should have 4 entries: src folder, main.rs, lib.rs, README.md
+        let mut expanded_state = std::collections::HashMap::new();
+        let flat_expanded = flatten_tree_with_state(&tree, 0, &expanded_state);
+        assert_eq!(flat_expanded.len(), 4);
+        assert_eq!(flat_expanded[0].name, "src");
+        assert!(flat_expanded[0].is_folder);
+        assert!(flat_expanded[0].is_expanded);
+
+        // When src is collapsed, should have 2 entries: src folder, README.md
+        expanded_state.insert("src".to_string(), false);
+        let flat_collapsed = flatten_tree_with_state(&tree, 0, &expanded_state);
+        assert_eq!(flat_collapsed.len(), 2);
+        assert_eq!(flat_collapsed[0].name, "src");
+        assert!(!flat_collapsed[0].is_expanded);
+        assert_eq!(flat_collapsed[1].name, "README.md");
     }
 }

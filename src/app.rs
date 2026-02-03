@@ -1,5 +1,5 @@
 use crate::cli::{Args, DiffTarget};
-use crate::git::{build_file_tree, flatten_tree, DiffData, Repository};
+use crate::git::{build_file_tree, flatten_tree_with_state, DiffData, FileTreeNode, Repository};
 use crate::github::{self, FileComments, PrCommit};
 use crate::highlighting::SyntaxHighlighter;
 use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
@@ -7,6 +7,7 @@ use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct App {
@@ -20,6 +21,10 @@ pub struct App {
     pr_base_ref: Rc<RefCell<Option<String>>>,
     pr_head_ref: Rc<RefCell<Option<String>>>,
     highlighter: Rc<RefCell<SyntaxHighlighter>>,
+    /// Cached file tree for re-flattening when folders are toggled
+    file_tree: Rc<RefCell<Vec<FileTreeNode>>>,
+    /// Expanded state for folders (path -> is_expanded)
+    expanded_state: Rc<RefCell<HashMap<String, bool>>>,
 }
 
 impl App {
@@ -80,6 +85,8 @@ impl App {
             pr_base_ref: Rc::new(RefCell::new(None)),
             pr_head_ref: Rc::new(RefCell::new(None)),
             highlighter: Rc::new(RefCell::new(highlighter)),
+            file_tree: Rc::new(RefCell::new(Vec::new())),
+            expanded_state: Rc::new(RefCell::new(HashMap::new())),
         };
 
         app.setup_callbacks()?;
@@ -107,6 +114,36 @@ impl App {
             }
 
             window.set_selected_file(path);
+        });
+
+        // Folder toggle callback for collapsing/expanding directories
+        let window_weak = self.window.as_weak();
+        let file_tree = Rc::clone(&self.file_tree);
+        let expanded_state = Rc::clone(&self.expanded_state);
+        self.window.on_folder_toggled(move |path| {
+            let window = window_weak.unwrap();
+            let path_str = path.to_string();
+
+            // Toggle the expanded state for this folder
+            {
+                let mut state = expanded_state.borrow_mut();
+                let is_expanded = state.get(&path_str).copied().unwrap_or(true);
+                state.insert(path_str, !is_expanded);
+            }
+
+            // Re-flatten the tree with updated expanded state
+            let tree = file_tree.borrow();
+            let state = expanded_state.borrow();
+            let flat_entries = flatten_tree_with_state(&tree, 0, &state);
+
+            // Convert to UI models
+            let file_entries: Vec<FileEntry> = flat_entries
+                .iter()
+                .map(|f| FileEntryModel::from(f).into())
+                .collect();
+
+            let files_model = Rc::new(VecModel::from(file_entries));
+            window.set_files(ModelRc::from(files_model));
         });
 
         let window_weak = self.window.as_weak();
@@ -203,8 +240,9 @@ impl App {
 
             if let Some((Ok(diff_data), grouped_comments)) = diff_result {
                 // Build hierarchical file tree and flatten for UI
+                // Use empty expanded state for commit-specific views (fresh view each time)
                 let tree = build_file_tree(&diff_data.files);
-                let flat_entries = flatten_tree(&tree, 0);
+                let flat_entries = flatten_tree_with_state(&tree, 0, &HashMap::new());
 
                 // Convert to UI models
                 let file_entries: Vec<FileEntry> = flat_entries
@@ -346,7 +384,9 @@ impl App {
 
         // Build hierarchical file tree and flatten for UI
         let tree = build_file_tree(&diff_data.files);
-        let flat_entries = flatten_tree(&tree, 0);
+        let expanded_state = self.expanded_state.borrow();
+        let flat_entries = flatten_tree_with_state(&tree, 0, &expanded_state);
+        drop(expanded_state);
 
         // Convert to UI models
         let file_entries: Vec<FileEntry> = flat_entries
@@ -367,6 +407,7 @@ impl App {
         }
 
         // Store for later use in callbacks
+        *self.file_tree.borrow_mut() = tree;
         *self.diff_data.borrow_mut() = Some(diff_data);
 
         Ok(())
