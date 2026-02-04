@@ -59,6 +59,8 @@ export component MainWindow inherits Window {
     callback commit-selected(int);
     callback settings-changed(AppSettings);
     callback toggle-fullscreen();
+    // Returns next file index (skipping directories), -1 if none found
+    callback find-next-file(/* current */ int, /* direction: 1=next, -1=prev */ int) -> int;
 
     init => {
         main-focus.focus();
@@ -94,18 +96,18 @@ export component MainWindow inherits Window {
                 return accept;
             }
 
-            // FILE NAVIGATION (J/K - uppercase/shift)
+            // FILE NAVIGATION (J/K - uppercase/shift) - skip directories
             if (event.text == root.app-settings.key-file-next) {
-                root.focused-index = min(root.focused-index + 1, root.files.length - 1);
-                if (!root.files[root.focused-index].is-folder) {
+                root.focused-index = root.find-next-file(root.focused-index, 1);
+                if (root.focused-index >= 0 && root.focused-index < root.files.length) {
                     root.selected-file = root.files[root.focused-index].path;
                     root.file-selected(root.selected-file);
                 }
                 return accept;
             }
             if (event.text == root.app-settings.key-file-prev) {
-                root.focused-index = max(root.focused-index - 1, 0);
-                if (!root.files[root.focused-index].is-folder) {
+                root.focused-index = root.find-next-file(root.focused-index, -1);
+                if (root.focused-index >= 0 && root.focused-index < root.files.length) {
                     root.selected-file = root.files[root.focused-index].path;
                     root.file-selected(root.selected-file);
                 }

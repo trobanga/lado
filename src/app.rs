@@ -5,7 +5,7 @@ use crate::highlighting::SyntaxHighlighter;
 use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
 use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -313,6 +313,34 @@ impl App {
                     let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl);
                     window.set_lines(lines);
                 }
+            }
+        });
+
+        // Find next file callback (skips directories)
+        let window_weak = self.window.as_weak();
+        self.window.on_find_next_file(move |current_idx, direction| {
+            let window = window_weak.unwrap();
+            let files = window.get_files();
+            let len = files.row_count() as i32;
+
+            if len == 0 {
+                return -1;
+            }
+
+            let mut idx = current_idx + direction;
+            while idx >= 0 && idx < len {
+                if let Some(file) = files.row_data(idx as usize) {
+                    if !file.is_folder {
+                        return idx;
+                    }
+                }
+                idx += direction;
+            }
+            // No file found in that direction, return current or -1
+            if current_idx >= 0 && current_idx < len {
+                current_idx
+            } else {
+                -1
             }
         });
 
