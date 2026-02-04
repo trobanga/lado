@@ -61,6 +61,11 @@ export component MainWindow inherits Window {
     callback toggle-fullscreen();
     // Returns next file index (skipping directories), -1 if none found
     callback find-next-file(/* current */ int, /* direction: 1=next, -1=prev */ int) -> int;
+    // File tree expand/collapse callbacks
+    callback expand-all-directories();
+    callback collapse-all-directories();
+    callback toggle-focused-directory();
+    callback expand-focused-recursive();
 
     init => {
         main-focus.focus();
@@ -150,6 +155,29 @@ export component MainWindow inherits Window {
                 root.side-by-side-mode = true;
                 return accept;
             }
+
+            // FILE TREE EXPAND/COLLAPSE
+            // e - toggle expand/collapse on focused folder
+            if (event.text == "e") {
+                root.toggle-focused-directory();
+                return accept;
+            }
+            // E (Shift+e) - expand all directories
+            if (event.text == "E") {
+                root.expand-all-directories();
+                return accept;
+            }
+            // c - collapse all directories
+            if (event.text == "c") {
+                root.collapse-all-directories();
+                return accept;
+            }
+            // C (Shift+c) - expand focused directory recursively
+            if (event.text == "C") {
+                root.expand-focused-recursive();
+                return accept;
+            }
+
             reject
         }
 

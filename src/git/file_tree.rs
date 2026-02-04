@@ -131,6 +131,37 @@ pub struct FlatFileEntry {
     pub status: String,
 }
 
+/// Collect all folder paths from a file tree (for bulk expand/collapse operations)
+pub fn collect_folder_paths(nodes: &[FileTreeNode]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for node in nodes {
+        if node.is_folder {
+            paths.push(node.path.clone());
+            paths.extend(collect_folder_paths(&node.children));
+        }
+    }
+    paths
+}
+
+/// Collect folder paths under a specific path (for recursive expand on a subtree)
+/// Note: folder paths in the tree use just the folder name, not full paths
+pub fn collect_folder_paths_under(nodes: &[FileTreeNode], target_path: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for node in nodes {
+        if node.is_folder {
+            if node.path == target_path {
+                // Found the target, collect it and all descendants
+                paths.push(node.path.clone());
+                paths.extend(collect_folder_paths(&node.children));
+            } else {
+                // Recurse into children to find the target
+                paths.extend(collect_folder_paths_under(&node.children, target_path));
+            }
+        }
+    }
+    paths
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +241,76 @@ mod tests {
         assert_eq!(flat_collapsed[0].name, "src");
         assert!(!flat_collapsed[0].is_expanded);
         assert_eq!(flat_collapsed[1].name, "README.md");
+    }
+
+    #[test]
+    fn test_collect_folder_paths() {
+        let files = vec![
+            FileChange {
+                path: "src/main.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 10,
+                deletions: 5,
+            },
+            FileChange {
+                path: "src/git/diff.rs".to_string(),
+                status: FileStatus::Added,
+                additions: 20,
+                deletions: 0,
+            },
+            FileChange {
+                path: "tests/test.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 5,
+                deletions: 2,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+        let paths = collect_folder_paths(&tree);
+
+        // Should have 3 folders: src, git (nested under src), tests
+        // Note: nested folder paths are just the folder name, not full path
+        assert_eq!(paths.len(), 3);
+        assert!(paths.contains(&"src".to_string()));
+        assert!(paths.contains(&"git".to_string())); // nested folder uses just name
+        assert!(paths.contains(&"tests".to_string()));
+    }
+
+    #[test]
+    fn test_collect_folder_paths_under() {
+        let files = vec![
+            FileChange {
+                path: "src/git/diff.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 10,
+                deletions: 5,
+            },
+            FileChange {
+                path: "src/git/repo.rs".to_string(),
+                status: FileStatus::Added,
+                additions: 20,
+                deletions: 0,
+            },
+            FileChange {
+                path: "src/app.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 5,
+                deletions: 2,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        // Collecting under "src" should get src and git (nested folder name)
+        let paths_under_src = collect_folder_paths_under(&tree, "src");
+        assert_eq!(paths_under_src.len(), 2);
+        assert!(paths_under_src.contains(&"src".to_string()));
+        assert!(paths_under_src.contains(&"git".to_string()));
+
+        // Collecting under "git" (nested folder) should only get git
+        let paths_under_git = collect_folder_paths_under(&tree, "git");
+        assert_eq!(paths_under_git.len(), 1);
+        assert!(paths_under_git.contains(&"git".to_string()));
     }
 }

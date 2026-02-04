@@ -1,5 +1,8 @@
 use crate::cli::{Args, DiffTarget};
-use crate::git::{build_file_tree, flatten_tree_with_state, DiffData, FileTreeNode, Repository};
+use crate::git::{
+    build_file_tree, collect_folder_paths, collect_folder_paths_under, flatten_tree_with_state,
+    DiffData, FileTreeNode, Repository,
+};
 use crate::github::{self, FileComments, PrCommit};
 use crate::highlighting::SyntaxHighlighter;
 use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
@@ -341,6 +344,144 @@ impl App {
                 current_idx
             } else {
                 -1
+            }
+        });
+
+        // Expand all directories callback
+        let window_weak = self.window.as_weak();
+        let file_tree = Rc::clone(&self.file_tree);
+        let expanded_state = Rc::clone(&self.expanded_state);
+        self.window.on_expand_all_directories(move || {
+            let window = window_weak.unwrap();
+            let tree = file_tree.borrow();
+            let folder_paths = collect_folder_paths(&tree);
+
+            // Set all folders to expanded
+            {
+                let mut state = expanded_state.borrow_mut();
+                for path in folder_paths {
+                    state.insert(path, true);
+                }
+            }
+
+            // Re-flatten the tree
+            let state = expanded_state.borrow();
+            let flat_entries = flatten_tree_with_state(&tree, 0, &state);
+
+            let file_entries: Vec<FileEntry> = flat_entries
+                .iter()
+                .map(|f| FileEntryModel::from(f).into())
+                .collect();
+
+            let files_model = Rc::new(VecModel::from(file_entries));
+            window.set_files(ModelRc::from(files_model));
+        });
+
+        // Collapse all directories callback
+        let window_weak = self.window.as_weak();
+        let file_tree = Rc::clone(&self.file_tree);
+        let expanded_state = Rc::clone(&self.expanded_state);
+        self.window.on_collapse_all_directories(move || {
+            let window = window_weak.unwrap();
+            let tree = file_tree.borrow();
+            let folder_paths = collect_folder_paths(&tree);
+
+            // Set all folders to collapsed
+            {
+                let mut state = expanded_state.borrow_mut();
+                for path in folder_paths {
+                    state.insert(path, false);
+                }
+            }
+
+            // Re-flatten the tree
+            let state = expanded_state.borrow();
+            let flat_entries = flatten_tree_with_state(&tree, 0, &state);
+
+            let file_entries: Vec<FileEntry> = flat_entries
+                .iter()
+                .map(|f| FileEntryModel::from(f).into())
+                .collect();
+
+            let files_model = Rc::new(VecModel::from(file_entries));
+            window.set_files(ModelRc::from(files_model));
+        });
+
+        // Toggle focused directory callback
+        let window_weak = self.window.as_weak();
+        let file_tree = Rc::clone(&self.file_tree);
+        let expanded_state = Rc::clone(&self.expanded_state);
+        self.window.on_toggle_focused_directory(move || {
+            let window = window_weak.unwrap();
+            let files = window.get_files();
+            let focused_idx = window.get_focused_index() as usize;
+
+            // Get the focused file entry
+            if let Some(entry) = files.row_data(focused_idx) {
+                if entry.is_folder {
+                    let path = entry.path.to_string();
+
+                    // Toggle the expanded state
+                    {
+                        let mut state = expanded_state.borrow_mut();
+                        let is_expanded = state.get(&path).copied().unwrap_or(true);
+                        state.insert(path, !is_expanded);
+                    }
+
+                    // Re-flatten the tree
+                    let tree = file_tree.borrow();
+                    let state = expanded_state.borrow();
+                    let flat_entries = flatten_tree_with_state(&tree, 0, &state);
+
+                    let file_entries: Vec<FileEntry> = flat_entries
+                        .iter()
+                        .map(|f| FileEntryModel::from(f).into())
+                        .collect();
+
+                    let files_model = Rc::new(VecModel::from(file_entries));
+                    window.set_files(ModelRc::from(files_model));
+                }
+            }
+        });
+
+        // Expand focused directory recursively callback
+        let window_weak = self.window.as_weak();
+        let file_tree = Rc::clone(&self.file_tree);
+        let expanded_state = Rc::clone(&self.expanded_state);
+        self.window.on_expand_focused_recursive(move || {
+            let window = window_weak.unwrap();
+            let files = window.get_files();
+            let focused_idx = window.get_focused_index() as usize;
+
+            // Get the focused file entry
+            if let Some(entry) = files.row_data(focused_idx) {
+                if entry.is_folder {
+                    let path = entry.path.to_string();
+
+                    // Get all folder paths under (and including) the focused folder
+                    let tree = file_tree.borrow();
+                    let folder_paths = collect_folder_paths_under(&tree, &path);
+
+                    // Set all to expanded
+                    {
+                        let mut state = expanded_state.borrow_mut();
+                        for p in folder_paths {
+                            state.insert(p, true);
+                        }
+                    }
+
+                    // Re-flatten the tree
+                    let state = expanded_state.borrow();
+                    let flat_entries = flatten_tree_with_state(&tree, 0, &state);
+
+                    let file_entries: Vec<FileEntry> = flat_entries
+                        .iter()
+                        .map(|f| FileEntryModel::from(f).into())
+                        .collect();
+
+                    let files_model = Rc::new(VecModel::from(file_entries));
+                    window.set_files(ModelRc::from(files_model));
+                }
             }
         });
 
