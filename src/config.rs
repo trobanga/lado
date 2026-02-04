@@ -10,7 +10,6 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Config {
     pub ui_theme: String,
-    pub syntax_theme: String,
     pub font_size: i32,
     pub tab_width: i32,
     pub line_wrap: bool,
@@ -29,7 +28,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             ui_theme: "dark".to_string(),
-            syntax_theme: "base16-ocean.dark".to_string(),
             font_size: 14,
             tab_width: 4,
             line_wrap: false,
@@ -99,7 +97,6 @@ mod tests {
     fn test_serialize_deserialize() {
         let config = Config {
             ui_theme: "light".to_string(),
-            syntax_theme: "InspiredGitHub".to_string(),
             font_size: 16,
             tab_width: 2,
             line_wrap: true,

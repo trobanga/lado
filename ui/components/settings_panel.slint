@@ -3,7 +3,6 @@ import { ThemeColors } from "../theme.slint";
 // Settings data structure
 export struct AppSettings {
     ui-theme: string,       // "dark", "light", "solarized-dark", "solarized-light"
-    syntax-theme: string,
     font-size: int,
     tab-width: int,
     line-wrap: bool,
@@ -477,7 +476,6 @@ export component SettingsPanel inherits Rectangle {
     in property <length> container-width: 1200px;
     in-out property <AppSettings> settings: {
         ui-theme: "dark",
-        syntax-theme: "base16-ocean.dark",
         font-size: 13,
         tab-width: 4,
         line-wrap: false,
@@ -497,15 +495,6 @@ export component SettingsPanel inherits Rectangle {
     // UI theme options mapping
     property <[string]> ui-theme-options: ["Dark", "Light", "Solarized Dark", "Solarized Light"];
     property <[string]> ui-theme-values: ["dark", "light", "solarized-dark", "solarized-light"];
-
-    // Syntax theme options
-    property <[string]> syntax-theme-options: [
-        "base16-ocean.dark",
-        "base16-eighties.dark",
-        "base16-mocha.dark",
-        "Solarized (dark)",
-        "InspiredGitHub",
-    ];
 
     // Helper to get UI theme index
     pure function get-ui-theme-index(theme-name: string) -> int {
@@ -629,17 +618,6 @@ export component SettingsPanel inherits Rectangle {
                 SettingsSection {
                     theme: root.theme;
                     title: "CODE APPEARANCE";
-
-                    syntax-dropdown := DropdownSelect {
-                        theme: root.theme;
-                        label: "Syntax Theme";
-                        options: root.syntax-theme-options;
-                        selected-index: 0;
-                        changed(idx) => {
-                            root.settings.syntax-theme = self.options[idx];
-                            root.settings-changed(root.settings);
-                        }
-                    }
 
                     slider := SettingsSlider {
                         theme: root.theme;

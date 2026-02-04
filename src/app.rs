@@ -40,7 +40,6 @@ impl App {
         let config = crate::config::load();
         window.set_app_settings(crate::AppSettings {
             ui_theme: config.ui_theme.clone().into(),
-            syntax_theme: config.syntax_theme.clone().into(),
             font_size: config.font_size,
             tab_width: config.tab_width,
             line_wrap: config.line_wrap,
@@ -280,7 +279,6 @@ impl App {
             // Persist settings to config file
             let config = crate::config::Config {
                 ui_theme: settings.ui_theme.to_string(),
-                syntax_theme: settings.syntax_theme.to_string(),
                 font_size: settings.font_size,
                 tab_width: settings.tab_width,
                 line_wrap: settings.line_wrap,
@@ -297,14 +295,14 @@ impl App {
                 eprintln!("Warning: Could not save settings: {}", e);
             }
 
-            // Map UI theme to syntax theme if needed
+            // Derive syntax theme from UI theme
             let syntax_theme = match settings.ui_theme.as_str() {
-                "light" => "InspiredGitHub".to_string(),
-                "solarized-light" => "Solarized (light)".to_string(),
-                "solarized-dark" => "Solarized (dark)".to_string(),
-                _ => settings.syntax_theme.to_string(), // Use selected syntax theme for dark
+                "light" => "InspiredGitHub",
+                "solarized-light" => "Solarized (light)",
+                "solarized-dark" => "Solarized (dark)",
+                _ => "base16-ocean.dark",
             };
-            highlighter.borrow_mut().set_theme(&syntax_theme);
+            highlighter.borrow_mut().set_theme(syntax_theme);
 
             // Re-highlight currently selected file
             let window = window_weak.unwrap();
