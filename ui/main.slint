@@ -69,6 +69,8 @@ export component MainWindow inherits Window {
 
     // Global keyboard navigation
     main-focus := FocusScope {
+        width: 100%;
+        height: 100%;
 
         key-pressed(event) => {
             // F11 toggles fullscreen (works even with settings open)
@@ -167,24 +169,30 @@ export component MainWindow inherits Window {
                 }
             }
 
-            // Main content area
-            HorizontalLayout {
+            // Main content area - wrapper Rectangle stretches to fill
+            Rectangle {
                 vertical-stretch: 1;
+                background: root.theme.bg-primary;
 
-                // File tree panel
+                // File tree panel (positioned absolutely on left)
                 Rectangle {
+                    x: 0;
+                    y: 0;
                     width: 280px;
-                    vertical-stretch: 1;
+                    height: parent.height;
                     clip: true;
                     background: root.theme.bg-secondary;
 
                     Rectangle {
                         x: parent.width - 1px;
                         width: 1px;
+                        height: 100%;
                         background: root.theme.border-subtle;
                     }
 
                     VerticalLayout {
+                        width: 100%;
+                        height: 100%;
                         // Commit list (collapsible, above file tree)
                         CommitList {
                             theme: root.theme;
@@ -215,10 +223,12 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // Diff view area
+                // Diff view area (positioned to the right of file tree)
                 diff-view := DiffView {
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
+                    x: 280px;
+                    y: 0;
+                    width: parent.width - 280px;
+                    height: parent.height;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;
