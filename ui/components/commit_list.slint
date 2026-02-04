@@ -79,8 +79,8 @@ export component CommitList inherits Rectangle {
             padding-bottom: 8px;
             spacing: 2px;
 
-            // "All changes" option
-            Rectangle {
+            // "All changes" option (only show when there's more than one commit)
+            if commits.length > 1: Rectangle {
                 height: 28px;
                 background: (selected-index < 0) ? theme.accent-primary :
                     (all-touch.has-hover ? theme.bg-hover : transparent);
