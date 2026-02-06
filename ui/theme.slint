@@ -194,55 +194,56 @@ export global ThemePresets {
         };
     }
 
-    // Solarized Light theme
-    // Official palette: base3=#fdf6e3, base2=#eee8d5, base1=#93a1a1, base0=#839496
-    //                   base00=#657b83, base01=#586e75, base02=#073642, base03=#002b36
+    // Solarized Light theme (doom-solarized-light inspired)
+    // Based on doom-solarized-light palette from Emacs:
+    //   bg=#FDF6E3, fg=#556b72, bg-alt=#EEE8D5, fg-alt=#7B8787
+    //   base0-8: #FFFBF0..#626C6C gradients
     // Accents: yellow=#b58900, orange=#cb4b16, red=#dc322f, magenta=#d33682
     //          violet=#6c71c4, blue=#268bd2, cyan=#2aa198, green=#859900
     pure public function solarized-light() -> ThemeColors {
         return {
-            // Base colors (light mode uses base3/base2 for backgrounds)
-            bg-primary: #fdf6e3,    // base3 - main background
-            bg-secondary: #eee8d5,  // base2 - highlighted background
-            bg-tertiary: #eee8d5,   // base2 - (Solarized has limited bg options)
-            bg-hover: #eee8d5,      // base2
-            bg-selected: #eee8d5,   // base2
+            // Base colors (doom-solarized-light palette)
+            bg-primary: #FDF6E3,    // bg - main background
+            bg-secondary: #EEE8D5,  // bg-alt - alternate background
+            bg-tertiary: #F2E6CE,   // base3 - tertiary background
+            bg-hover: #E1DBCD,      // base4 - hover state
+            bg-selected: #D6D6D6,   // base5 - selected state
 
-            // Border colors (using base1 which is emphasized content in light mode)
-            border-subtle: #93a1a1, // base1
-            border-normal: #839496, // base0
+            // Border colors (using muted tones from base spectrum)
+            border-subtle: #E1DBCD, // base4 - subtle borders
+            border-normal: #96A7A9, // base6 - normal borders
 
-            // Text colors (light mode uses base00/base01 for text)
-            text-primary: #657b83,  // base00 - body text
-            text-secondary: #586e75, // base01 - emphasized/secondary
-            text-muted: #93a1a1,    // base1 - comments/muted
+            // Text colors (doom-solarized-light values)
+            text-primary: #556b72,  // fg - body text
+            text-secondary: #788484, // base7 - secondary text
+            text-muted: #96A7A9,    // base6 - muted/comments
 
-            // Diff colors (green/red tinted backgrounds blended with base3)
-            diff-add-bg: #e4f0d0,       // base3 + green tint
+            // Diff colors (green/red tinted backgrounds blended with bg)
+            diff-add-bg: #e4f0d0,       // bg + green tint
             diff-add-text: #859900,     // green
             diff-add-gutter: #d8e8c0,   // slightly stronger green tint for gutter
-            diff-remove-bg: #fce8e4,    // base3 + red tint
+            diff-remove-bg: #fce8e4,    // bg + red tint
             diff-remove-text: #dc322f,  // red
             diff-remove-gutter: #f8d8d4, // slightly stronger red tint for gutter
-            diff-context-bg: #fdf6e3,   // base3
-            diff-hunk-bg: #eee8d5,      // base2
+            diff-context-bg: #FDF6E3,   // bg
+            diff-hunk-bg: #EEE8D5,      // bg-alt
             diff-hunk-text: #268bd2,    // blue
 
-            // Accent colors (Solarized blue/cyan)
-            accent-primary: #268bd2, // blue
+            // Accent colors (doom-solarized-light uses blue/cyan)
+            accent-primary: #268bd2,   // blue
             accent-secondary: #2aa198, // cyan
 
-            // Status colors
-            status-added: #859900,   // green
-            status-modified: #b58900, // yellow
-            status-deleted: #dc322f, // red
+            // Status colors (semantic mappings from doom)
+            status-added: #859900,     // green (success)
+            status-modified: #b58900,  // yellow (warning)
+            status-deleted: #dc322f,   // red (error)
 
             // Comment colors
-            comment-bg: #eee8d5,     // base2
-            comment-border: #93a1a1, // base1
-            comment-author: #268bd2, // blue
-            comment-body: #657b83,   // base00
-            comment-timestamp: #93a1a1, // base1
+            comment-bg: #EEE8D5,       // bg-alt
+            comment-border: #96A7A9,   // base6
+            comment-author: #268bd2,   // blue
+            comment-body: #556b72,     // fg
+            comment-timestamp: #7B8787, // fg-alt
         };
     }
 }

@@ -70,7 +70,7 @@ impl App {
         let mut highlighter = SyntaxHighlighter::new();
         let syntax_theme = match config.ui_theme.as_str() {
             "light" => "InspiredGitHub",
-            "solarized-light" => "Solarized (light)",
+            "solarized-light" => "Doom Solarized Light",
             "solarized-dark" => "Solarized (dark)",
             _ => "base16-ocean.dark",
         };
@@ -298,7 +298,7 @@ impl App {
             // Derive syntax theme from UI theme
             let syntax_theme = match settings.ui_theme.as_str() {
                 "light" => "InspiredGitHub",
-                "solarized-light" => "Solarized (light)",
+                "solarized-light" => "Doom Solarized Light",
                 "solarized-dark" => "Solarized (dark)",
                 _ => "base16-ocean.dark",
             };

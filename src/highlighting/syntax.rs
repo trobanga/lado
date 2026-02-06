@@ -1,12 +1,16 @@
 //! Syntax highlighting for diff content.
 
+use std::io::Cursor;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Style, ThemeSet};
+use syntect::highlighting::{Style, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
 /// Maximum number of spans per line to prevent UI slowdown
 const MAX_SPANS_PER_LINE: usize = 50;
+
+/// Embedded custom themes (compiled into binary)
+const DOOM_SOLARIZED_LIGHT: &str = include_str!("../../themes/doom-solarized-light.tmTheme");
 
 /// Syntax highlighter using syntect
 pub struct SyntaxHighlighter {
@@ -17,11 +21,24 @@ pub struct SyntaxHighlighter {
 
 impl SyntaxHighlighter {
     pub fn new() -> Self {
+        let mut theme_set = ThemeSet::load_defaults();
+
+        // Load custom embedded themes
+        if let Ok(theme) = Self::parse_theme(DOOM_SOLARIZED_LIGHT) {
+            theme_set.themes.insert("Doom Solarized Light".to_string(), theme);
+        }
+
         Self {
             syntax_set: SyntaxSet::load_defaults_newlines(),
-            theme_set: ThemeSet::load_defaults(),
+            theme_set,
             current_theme: "base16-ocean.dark".to_string(),
         }
+    }
+
+    /// Parse a .tmTheme from string
+    fn parse_theme(theme_str: &str) -> Result<Theme, syntect::LoadingError> {
+        let mut cursor = Cursor::new(theme_str.as_bytes());
+        ThemeSet::load_from_reader(&mut cursor)
     }
 
     /// Set the current theme by name
@@ -115,4 +132,5 @@ mod tests {
 
         assert_eq!(result.len(), 1);
     }
+
 }

@@ -26,6 +26,10 @@ lado 42                  # Compare PR #42 (uses gh CLI)
 lado --completions zsh   # Generate shell completions
 ```
 
+## Skills
+
+Use the `/slint` skill when creating, reviewing, or modifying `.slint` UI files.
+
 ## Architecture
 
 ### Data Flow
