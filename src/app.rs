@@ -4,7 +4,7 @@ use crate::git::{
     DiffData, FileTreeNode, Repository,
 };
 use crate::github::{self, FileComments, PrCommit};
-use crate::highlighting::SyntaxHighlighter;
+use crate::highlighting::Highlighter;
 use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
 use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
@@ -23,7 +23,7 @@ pub struct App {
     all_pr_comments: Rc<RefCell<Vec<github::PrComment>>>,
     pr_base_ref: Rc<RefCell<Option<String>>>,
     pr_head_ref: Rc<RefCell<Option<String>>>,
-    highlighter: Rc<RefCell<SyntaxHighlighter>>,
+    highlighter: Rc<RefCell<Highlighter>>,
     /// Cached file tree for re-flattening when folders are toggled
     file_tree: Rc<RefCell<Vec<FileTreeNode>>>,
     /// Expanded state for folders (path -> is_expanded)
@@ -67,14 +67,8 @@ impl App {
         window.set_diff_title(diff_title.into());
 
         // Initialize syntax highlighter with theme matching UI theme
-        let mut highlighter = SyntaxHighlighter::new();
-        let syntax_theme = match config.ui_theme.as_str() {
-            "light" => "InspiredGitHub",
-            "solarized-light" => "Doom Solarized Light",
-            "solarized-dark" => "Solarized (dark)",
-            _ => "base16-ocean.dark",
-        };
-        highlighter.set_theme(syntax_theme);
+        let mut highlighter = Highlighter::new();
+        highlighter.set_theme(config.ui_theme.as_str());
 
         let app = Self {
             window,
@@ -295,14 +289,7 @@ impl App {
                 eprintln!("Warning: Could not save settings: {}", e);
             }
 
-            // Derive syntax theme from UI theme
-            let syntax_theme = match settings.ui_theme.as_str() {
-                "light" => "InspiredGitHub",
-                "solarized-light" => "Doom Solarized Light",
-                "solarized-dark" => "Solarized (dark)",
-                _ => "base16-ocean.dark",
-            };
-            highlighter.borrow_mut().set_theme(syntax_theme);
+            highlighter.borrow_mut().set_theme(settings.ui_theme.as_str());
 
             // Re-highlight currently selected file
             let window = window_weak.unwrap();
@@ -591,7 +578,7 @@ fn get_lines_for_file(
     data: &DiffData,
     path: &str,
     comments: Option<&FileComments>,
-    highlighter: &SyntaxHighlighter,
+    highlighter: &Highlighter,
 ) -> ModelRc<DiffLine> {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
     use crate::models::parse_hex_color;

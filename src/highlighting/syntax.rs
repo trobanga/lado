@@ -1,10 +1,12 @@
-//! Syntax highlighting for diff content.
+//! Syntect-based syntax highlighting (fallback for languages without tree-sitter).
 
 use std::io::Cursor;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
+
+use super::{HighlightedLine, HighlightedSpan};
 
 /// Maximum number of spans per line to prevent UI slowdown
 const MAX_SPANS_PER_LINE: usize = 50;
@@ -97,19 +99,6 @@ impl Default for SyntaxHighlighter {
     }
 }
 
-/// A highlighted line consisting of styled spans
-#[derive(Debug, Clone)]
-pub struct HighlightedLine {
-    pub spans: Vec<HighlightedSpan>,
-}
-
-/// A span of text with color
-#[derive(Debug, Clone)]
-pub struct HighlightedSpan {
-    pub text: String,
-    pub color: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +121,4 @@ mod tests {
 
         assert_eq!(result.len(), 1);
     }
-
 }
