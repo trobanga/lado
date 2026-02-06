@@ -10,6 +10,9 @@ use super::{HighlightedLine, HighlightedSpan};
 /// Maximum spans per line to prevent UI slowdown on very long lines.
 const MAX_SPANS_PER_LINE: usize = 50;
 
+/// Highlights query for Slint (from slint-ui/slint Zed editor integration, MIT licensed).
+const SLINT_HIGHLIGHTS_QUERY: &str = include_str!("queries/slint-highlights.scm");
+
 struct LangConfig {
     config: HighlightConfiguration,
 }
@@ -172,6 +175,15 @@ impl TreeSitterHighlighter {
             "",
         );
 
+        hl.register_lang(
+            &["slint"],
+            "slint",
+            tree_sitter_slint::LANGUAGE.into(),
+            SLINT_HIGHLIGHTS_QUERY,
+            "",
+            "",
+        );
+
         hl
     }
 
@@ -324,6 +336,7 @@ mod tests {
         assert!(hl.can_highlight("yml"));
         assert!(hl.can_highlight("yaml"));
         assert!(hl.can_highlight("sh"));
+        assert!(hl.can_highlight("slint"));
     }
 
     #[test]
