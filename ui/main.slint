@@ -261,17 +261,11 @@ export component MainWindow inherits Window {
                         width: 9px;
                         height: 100%;
                         mouse-cursor: col-resize;
-                        property <length> press-start-width;
 
-                        pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                                self.press-start-width = root.left-panel-width;
-                            }
-                        }
                         moved => {
                             if (self.pressed) {
                                 root.left-panel-width = clamp(
-                                    self.press-start-width + (self.mouse-x - self.pressed-x),
+                                    root.left-panel-width + (self.mouse-x - self.pressed-x),
                                     150px, parent.width * 0.5
                                 );
                             }
