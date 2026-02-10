@@ -234,7 +234,8 @@ impl App {
                 None
             };
 
-            if let Some((Ok(diff_data), grouped_comments)) = diff_result {
+            if let Some((Ok(mut diff_data), grouped_comments)) = diff_result {
+                diff_data.expand_tabs(window.get_app_settings().tab_width as usize);
                 // Build hierarchical file tree and flatten for UI
                 // Use empty expanded state for commit-specific views (fresh view each time)
                 let tree = build_file_tree(&diff_data.files);
@@ -534,7 +535,8 @@ impl App {
         };
 
         // Compute the diff
-        let diff_data = self.repo.diff_commits(base_oid, head_oid)?;
+        let mut diff_data = self.repo.diff_commits(base_oid, head_oid)?;
+        diff_data.expand_tabs(self.window.get_app_settings().tab_width as usize);
 
         // Build hierarchical file tree and flatten for UI
         let tree = build_file_tree(&diff_data.files);
