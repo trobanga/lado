@@ -54,6 +54,8 @@ impl App {
         });
         // Apply theme from config (theme is derived from theme-name in Slint)
         window.set_theme_name(config.ui_theme.clone().into());
+        // Restore persisted panel width
+        window.set_left_panel_width(config.panel_width);
 
         // Set the diff title based on target
         let diff_title = match &target {
@@ -272,11 +274,13 @@ impl App {
         let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_settings_changed(move |settings| {
             // Persist settings to config file
+            let window = window_weak.unwrap();
             let config = crate::config::Config {
                 ui_theme: settings.ui_theme.to_string(),
                 font_size: settings.font_size,
                 tab_width: settings.tab_width,
                 line_wrap: settings.line_wrap,
+                panel_width: window.get_left_panel_width(),
                 key_unified: settings.key_unified.to_string(),
                 key_side_by_side: settings.key_side_by_side.to_string(),
                 key_scroll_down: settings.key_scroll_down.to_string(),
@@ -293,7 +297,6 @@ impl App {
             highlighter.borrow_mut().set_theme(settings.ui_theme.as_str());
 
             // Re-highlight currently selected file
-            let window = window_weak.unwrap();
             let selected_file = window.get_selected_file().to_string();
             if !selected_file.is_empty() {
                 if let Some(ref data) = *diff_data.borrow() {
@@ -571,6 +574,14 @@ impl App {
 
     pub fn run(self) -> Result<()> {
         self.window.run().context("Failed to run window")?;
+
+        // Persist panel width on exit
+        let mut config = crate::config::load();
+        config.panel_width = self.window.get_left_panel_width();
+        if let Err(e) = crate::config::save(&config) {
+            eprintln!("Warning: Could not save panel width: {}", e);
+        }
+
         Ok(())
     }
 }

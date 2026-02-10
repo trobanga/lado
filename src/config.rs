@@ -13,6 +13,7 @@ pub struct Config {
     pub font_size: i32,
     pub tab_width: i32,
     pub line_wrap: bool,
+    pub panel_width: f32,
     // Keybindings
     pub key_unified: String,
     pub key_side_by_side: String,
@@ -31,6 +32,7 @@ impl Default for Config {
             font_size: 14,
             tab_width: 4,
             line_wrap: false,
+            panel_width: 280.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_scroll_down: "j".to_string(),
@@ -100,6 +102,7 @@ mod tests {
             font_size: 16,
             tab_width: 2,
             line_wrap: true,
+            panel_width: 300.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_scroll_down: "j".to_string(),

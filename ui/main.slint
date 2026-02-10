@@ -34,6 +34,7 @@ export component MainWindow inherits Window {
     in-out property <[PrCommitEntry]> commits: [];
     in-out property <int> selected-commit-index: -1;
     in-out property <bool> settings-visible: false;
+    in-out property <length> left-panel-width: 280px;
     in-out property <AppSettings> app-settings: {
         ui-theme: "dark",
         syntax-theme: "base16-ocean.dark",
@@ -208,17 +209,10 @@ export component MainWindow inherits Window {
                 Rectangle {
                     x: 0;
                     y: 0;
-                    width: 280px;
+                    width: root.left-panel-width;
                     height: parent.height;
                     clip: true;
                     background: root.theme.bg-secondary;
-
-                    Rectangle {
-                        x: parent.width - 1px;
-                        width: 1px;
-                        height: 100%;
-                        background: root.theme.border-subtle;
-                    }
 
                     VerticalLayout {
                         width: 100%;
@@ -253,11 +247,44 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                // Draggable splitter between file tree and diff view
+                Rectangle {
+                    x: root.left-panel-width - 1px;
+                    y: 0;
+                    width: 1px;
+                    height: parent.height;
+                    background: splitter-touch.has-hover || splitter-touch.pressed
+                        ? root.theme.accent-primary : root.theme.border-subtle;
+
+                    splitter-touch := TouchArea {
+                        x: -4px;
+                        width: 9px;
+                        height: 100%;
+                        mouse-cursor: col-resize;
+                        property <length> press-start-width;
+
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                self.press-start-width = root.left-panel-width;
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.left-panel-width = clamp(
+                                    self.press-start-width + (self.mouse-x - self.pressed-x),
+                                    150px, parent.width * 0.5
+                                );
+                            }
+                        }
+                    }
+                    animate background { duration: 150ms; }
+                }
+
                 // Diff view area (positioned to the right of file tree)
                 diff-view := DiffView {
-                    x: 280px;
+                    x: root.left-panel-width;
                     y: 0;
-                    width: parent.width - 280px;
+                    width: parent.width - root.left-panel-width;
                     height: parent.height;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
