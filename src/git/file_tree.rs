@@ -20,7 +20,7 @@ pub fn build_file_tree(files: &[FileChange]) -> Vec<FileTreeNode> {
 
     for file in files {
         let parts: Vec<&str> = file.path.split('/').collect();
-        insert_path(&mut root, &parts, &file.path, file.status.as_str());
+        insert_path(&mut root, &parts, &file.path, file.status.as_str(), "");
     }
 
     // Convert HashMap to sorted Vec
@@ -35,6 +35,7 @@ fn insert_path(
     parts: &[&str],
     full_path: &str,
     status: &str,
+    prefix: &str,
 ) {
     if parts.is_empty() {
         return;
@@ -43,12 +44,19 @@ fn insert_path(
     let name = parts[0].to_string();
     let is_file = parts.len() == 1;
 
+    // Build the fully qualified folder path so each folder has a unique identity
+    let folder_path = if prefix.is_empty() {
+        name.clone()
+    } else {
+        format!("{prefix}/{name}")
+    };
+
     let node = nodes.entry(name.clone()).or_insert_with(|| FileTreeNode {
         name: name.clone(),
         path: if is_file {
             full_path.to_string()
         } else {
-            parts[..1].join("/")
+            folder_path.clone()
         },
         is_folder: !is_file,
         children: Vec::new(),
@@ -65,7 +73,7 @@ fn insert_path(
             .map(|n| (n.name.clone(), n))
             .collect();
 
-        insert_path(&mut child_map, &parts[1..], full_path, status);
+        insert_path(&mut child_map, &parts[1..], full_path, status, &folder_path);
 
         node.children = child_map.into_values().collect();
     }
@@ -194,7 +202,7 @@ pub fn collect_folder_paths(nodes: &[FileTreeNode]) -> Vec<String> {
 }
 
 /// Collect folder paths under a specific path (for recursive expand on a subtree)
-/// Note: folder paths in the tree use just the folder name, not full paths
+/// Folder paths are fully qualified (e.g., "src/git" not just "git")
 pub fn collect_folder_paths_under(nodes: &[FileTreeNode], target_path: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for node in nodes {
@@ -319,11 +327,10 @@ mod tests {
         let tree = build_file_tree(&files);
         let paths = collect_folder_paths(&tree);
 
-        // Should have 3 folders: src, git (nested under src), tests
-        // Note: nested folder paths are just the folder name, not full path
+        // Should have 3 folders: src, src/git (nested under src), tests
         assert_eq!(paths.len(), 3);
         assert!(paths.contains(&"src".to_string()));
-        assert!(paths.contains(&"git".to_string())); // nested folder uses just name
+        assert!(paths.contains(&"src/git".to_string()));
         assert!(paths.contains(&"tests".to_string()));
     }
 
@@ -352,16 +359,16 @@ mod tests {
 
         let tree = build_file_tree(&files);
 
-        // Collecting under "src" should get src and git (nested folder name)
+        // Collecting under "src" should get src and src/git
         let paths_under_src = collect_folder_paths_under(&tree, "src");
         assert_eq!(paths_under_src.len(), 2);
         assert!(paths_under_src.contains(&"src".to_string()));
-        assert!(paths_under_src.contains(&"git".to_string()));
+        assert!(paths_under_src.contains(&"src/git".to_string()));
 
-        // Collecting under "git" (nested folder) should only get git
-        let paths_under_git = collect_folder_paths_under(&tree, "git");
+        // Collecting under "src/git" should only get src/git
+        let paths_under_git = collect_folder_paths_under(&tree, "src/git");
         assert_eq!(paths_under_git.len(), 1);
-        assert!(paths_under_git.contains(&"git".to_string()));
+        assert!(paths_under_git.contains(&"src/git".to_string()));
     }
 
     #[test]
