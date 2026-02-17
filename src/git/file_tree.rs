@@ -454,4 +454,87 @@ mod tests {
         assert_eq!(tree[0].children.len(), 1);
         assert_eq!(tree[0].children[0].name, "file.txt");
     }
+
+    #[test]
+    fn test_compact_disambiguates_siblings() {
+        // User's exact example: a/c/c/b/foo/bar and b/c/c/b/foo/bar
+        // Should produce "a/.../bar" and "b/.../bar" — distinct first segments
+        let files = vec![
+            FileChange {
+                path: "a/c/c/b/foo/bar/file1.txt".to_string(),
+                status: FileStatus::Modified,
+                additions: 1,
+                deletions: 0,
+            },
+            FileChange {
+                path: "b/c/c/b/foo/bar/file2.txt".to_string(),
+                status: FileStatus::Added,
+                additions: 1,
+                deletions: 0,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 2);
+        let names: Vec<&str> = tree.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&"a/.../bar"));
+        assert!(names.contains(&"b/.../bar"));
+    }
+
+    #[test]
+    fn test_compact_no_disambiguation_needed() {
+        // Two distinct chains — different leaf names, no collision possible
+        let files = vec![
+            FileChange {
+                path: "a/b/c/d/file1.txt".to_string(),
+                status: FileStatus::Modified,
+                additions: 1,
+                deletions: 0,
+            },
+            FileChange {
+                path: "x/y/z/w/file2.txt".to_string(),
+                status: FileStatus::Added,
+                additions: 1,
+                deletions: 0,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 2);
+        let names: Vec<&str> = tree.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&"a/.../d"));
+        assert!(names.contains(&"x/.../w"));
+    }
+
+    #[test]
+    fn test_compact_nested_chains_under_common_parent() {
+        // Common parent "src" with two children that each have compactable chains
+        let files = vec![
+            FileChange {
+                path: "src/a/b/c/file1.txt".to_string(),
+                status: FileStatus::Modified,
+                additions: 1,
+                deletions: 0,
+            },
+            FileChange {
+                path: "src/x/y/z/file2.txt".to_string(),
+                status: FileStatus::Added,
+                additions: 1,
+                deletions: 0,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        // "src" has 2 children, so it doesn't compact
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "src");
+        assert_eq!(tree[0].children.len(), 2);
+        // Each child compacts independently
+        let child_names: Vec<&str> = tree[0].children.iter().map(|n| n.name.as_str()).collect();
+        assert!(child_names.contains(&"a/.../c"));
+        assert!(child_names.contains(&"x/.../z"));
+    }
 }
