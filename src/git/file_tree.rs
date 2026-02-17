@@ -25,6 +25,7 @@ pub fn build_file_tree(files: &[FileChange]) -> Vec<FileTreeNode> {
 
     // Convert HashMap to sorted Vec
     let mut nodes: Vec<FileTreeNode> = root.into_values().collect();
+    compact_tree(&mut nodes);
     sort_tree(&mut nodes);
     nodes
 }
@@ -82,6 +83,55 @@ fn sort_tree(nodes: &mut [FileTreeNode]) {
 
     for node in nodes {
         sort_tree(&mut node.children);
+    }
+}
+
+/// Compact single-child folder chains into "first/.../last" display names.
+/// This reduces visual clutter when deeply nested folders have only one subfolder.
+fn compact_tree(nodes: &mut [FileTreeNode]) {
+    for node in nodes.iter_mut() {
+        if node.is_folder {
+            compact_node(node);
+        }
+    }
+}
+
+/// Recursively compact a single folder node.
+/// Merges chains of 3+ single-child folders into "first/.../last".
+fn compact_node(node: &mut FileTreeNode) {
+    // Compact THIS node's chain first (top-down) to avoid double-compaction
+    // when chains span 5+ segments.
+    let chain_depth = count_single_child_depth(node);
+
+    if chain_depth >= 2 {
+        // Walk down to the leaf folder of the single-child chain.
+        let mut leaf = node.children.pop().unwrap();
+        while leaf.children.len() == 1 && leaf.children[0].is_folder {
+            leaf = leaf.children.pop().unwrap();
+        }
+
+        let first = &node.name;
+        let last = &leaf.name;
+        node.name = format!("{first}/.../{last}");
+        node.path = leaf.path;
+        node.children = leaf.children;
+    }
+
+    // THEN recurse into children (which may themselves have compactable chains).
+    for child in node.children.iter_mut() {
+        if child.is_folder {
+            compact_node(child);
+        }
+    }
+}
+
+/// Count how many single-child folder links descend from `node`.
+/// e.g. a -> b -> c -> [files] returns 2 (b and c).
+fn count_single_child_depth(node: &FileTreeNode) -> usize {
+    if node.children.len() == 1 && node.children[0].is_folder {
+        1 + count_single_child_depth(&node.children[0])
+    } else {
+        0
     }
 }
 
@@ -384,5 +434,24 @@ mod tests {
         let child_names: Vec<&str> = tree[0].children.iter().map(|c| c.name.as_str()).collect();
         assert!(child_names.contains(&"b"));
         assert!(child_names.contains(&"c"));
+    }
+
+    #[test]
+    fn test_compact_deep_chain_single_ellipsis() {
+        // 5 folder segments should produce single ellipsis, not double
+        let files = vec![FileChange {
+            path: "a/b/c/d/e/file.txt".to_string(),
+            status: FileStatus::Modified,
+            additions: 1,
+            deletions: 0,
+        }];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "a/.../e");
+        assert!(tree[0].is_folder);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].name, "file.txt");
     }
 }
