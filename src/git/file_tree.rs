@@ -313,4 +313,76 @@ mod tests {
         assert_eq!(paths_under_git.len(), 1);
         assert!(paths_under_git.contains(&"git".to_string()));
     }
+
+    #[test]
+    fn test_compact_single_child_chain() {
+        // A chain of 3+ single-child folders should be compacted into "a/.../c"
+        let files = vec![FileChange {
+            path: "a/b/c/file.txt".to_string(),
+            status: FileStatus::Modified,
+            additions: 1,
+            deletions: 0,
+        }];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "a/.../c");
+        assert!(tree[0].is_folder);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].name, "file.txt");
+        assert!(!tree[0].children[0].is_folder);
+    }
+
+    #[test]
+    fn test_no_compact_two_segments() {
+        // Only 2 folder segments — should NOT be compacted
+        let files = vec![FileChange {
+            path: "a/b/file.txt".to_string(),
+            status: FileStatus::Added,
+            additions: 5,
+            deletions: 0,
+        }];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "a");
+        assert!(tree[0].is_folder);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].name, "b");
+        assert!(tree[0].children[0].is_folder);
+        assert_eq!(tree[0].children[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].children[0].name, "file.txt");
+    }
+
+    #[test]
+    fn test_no_compact_when_multiple_children() {
+        // Folder "a" has two children — should NOT be compacted
+        let files = vec![
+            FileChange {
+                path: "a/b/file1.txt".to_string(),
+                status: FileStatus::Modified,
+                additions: 3,
+                deletions: 1,
+            },
+            FileChange {
+                path: "a/c/file2.txt".to_string(),
+                status: FileStatus::Added,
+                additions: 7,
+                deletions: 0,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "a");
+        assert!(tree[0].is_folder);
+        assert_eq!(tree[0].children.len(), 2);
+        // Children should not be compacted — both "b" and "c" are direct children
+        let child_names: Vec<&str> = tree[0].children.iter().map(|c| c.name.as_str()).collect();
+        assert!(child_names.contains(&"b"));
+        assert!(child_names.contains(&"c"));
+    }
 }
