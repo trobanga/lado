@@ -537,4 +537,42 @@ mod tests {
         assert!(child_names.contains(&"a/.../c"));
         assert!(child_names.contains(&"x/.../z"));
     }
+
+    #[test]
+    fn test_compact_tree_with_flatten_and_expand_state() {
+        let files = vec![
+            FileChange {
+                path: "src/main/java/com/example/Service.java".to_string(),
+                status: FileStatus::Modified,
+                additions: 10,
+                deletions: 5,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+
+        // Should compact to one folder node with compacted name
+        assert_eq!(tree.len(), 1);
+        assert!(tree[0].name.contains("..."));
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].name, "Service.java");
+
+        // Flatten with default expanded state — should show compacted folder + file
+        let expanded_state = std::collections::HashMap::new();
+        let flat = flatten_tree_with_state(&tree, 0, &expanded_state);
+        assert_eq!(flat.len(), 2);
+        assert!(flat[0].name.contains("..."));
+        assert!(flat[0].is_folder);
+        assert!(flat[0].is_expanded);
+        assert_eq!(flat[0].depth, 0);
+        assert_eq!(flat[1].name, "Service.java");
+        assert_eq!(flat[1].depth, 1);
+
+        // Collapse the compacted folder using its path — should only show the folder
+        let mut collapsed_state = std::collections::HashMap::new();
+        collapsed_state.insert(tree[0].path.clone(), false);
+        let flat_collapsed = flatten_tree_with_state(&tree, 0, &collapsed_state);
+        assert_eq!(flat_collapsed.len(), 1);
+        assert!(!flat_collapsed[0].is_expanded);
+    }
 }
