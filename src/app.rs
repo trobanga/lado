@@ -30,18 +30,59 @@ pub struct App {
     expanded_state: Rc<RefCell<HashMap<String, bool>>>,
 }
 
+/// Count comments that actually match a diff line for a given file.
+/// Only counts comments whose line number matches a line in the diff,
+/// so stale/resolved comments pointing at lines no longer in the diff are excluded.
+fn count_matching_comments(
+    hunks: &[crate::git::DiffHunk],
+    comments: &[github::PrComment],
+) -> i32 {
+    use std::collections::HashSet;
+
+    // Collect all (side, line) pairs present in the diff
+    let mut new_lines = HashSet::new();
+    let mut old_lines = HashSet::new();
+    for hunk in hunks {
+        for line in &hunk.lines {
+            if let Some(n) = line.new_line_num {
+                new_lines.insert(n);
+            }
+            if let Some(n) = line.old_line_num {
+                old_lines.insert(n);
+            }
+        }
+    }
+
+    comments
+        .iter()
+        .filter(|c| match c.line {
+            Some(line) => match c.side {
+                github::CommentSide::Right => new_lines.contains(&line),
+                github::CommentSide::Left => old_lines.contains(&line),
+            },
+            None => false,
+        })
+        .count() as i32
+}
+
 /// Convert flat file entries to Slint FileEntry models, enriching with comment counts.
+/// Only counts comments that match actual diff lines (excludes stale comments).
 fn build_file_entries(
     flat_entries: &[crate::git::FlatFileEntry],
     pr_comments: Option<&FileComments>,
+    diff_data: Option<&DiffData>,
 ) -> Vec<FileEntry> {
     flat_entries
         .iter()
         .map(|f| {
             let mut model = FileEntryModel::from(f);
-            if let Some(comments) = pr_comments {
+            if let (Some(comments), Some(data)) = (pr_comments, diff_data) {
                 if let Some(file_comments) = comments.get(&f.path) {
-                    model.comment_count = file_comments.len() as i32;
+                    let hunks = data.file_hunks.get(&f.path);
+                    model.comment_count = match hunks {
+                        Some(h) => count_matching_comments(h, file_comments),
+                        None => 0,
+                    };
                 }
             }
             model.into()
@@ -138,6 +179,7 @@ impl App {
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let diff_data = Rc::clone(&self.diff_data);
         self.window.on_folder_toggled(move |path| {
             let window = window_weak.unwrap();
             let path_str = path.to_string();
@@ -154,7 +196,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -260,7 +302,7 @@ impl App {
                 let flat_entries = flatten_tree_with_state(&tree, 0, &HashMap::new());
 
                 let file_entries =
-                    build_file_entries(&flat_entries, grouped_comments.as_ref());
+                    build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data));
 
                 let files_model = Rc::new(VecModel::from(file_entries));
                 window.set_files(ModelRc::from(files_model));
@@ -354,6 +396,7 @@ impl App {
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let diff_data = Rc::clone(&self.diff_data);
         self.window.on_expand_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -371,7 +414,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -382,6 +425,7 @@ impl App {
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let diff_data = Rc::clone(&self.diff_data);
         self.window.on_collapse_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -399,7 +443,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -410,6 +454,7 @@ impl App {
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let diff_data = Rc::clone(&self.diff_data);
         self.window.on_toggle_focused_directory(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -433,7 +478,7 @@ impl App {
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
                     let file_entries =
-                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
+                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
@@ -446,6 +491,7 @@ impl App {
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
+        let diff_data = Rc::clone(&self.diff_data);
         self.window.on_expand_focused_recursive(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -473,7 +519,7 @@ impl App {
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
                     let file_entries =
-                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
+                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
@@ -554,7 +600,7 @@ impl App {
         let flat_entries = flatten_tree_with_state(&tree, 0, &expanded_state);
         drop(expanded_state);
 
-        let file_entries = build_file_entries(&flat_entries, self.pr_comments.borrow().as_ref());
+        let file_entries = build_file_entries(&flat_entries, self.pr_comments.borrow().as_ref(), Some(&diff_data));
 
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
