@@ -584,4 +584,25 @@ mod tests {
         assert_eq!(flat_collapsed.len(), 1);
         assert!(!flat_collapsed[0].is_expanded);
     }
+
+    #[test]
+    fn test_flat_entry_comment_count_default() {
+        let files = vec![FileChange {
+            path: "src/main.rs".to_string(),
+            status: FileStatus::Modified,
+            additions: 1,
+            deletions: 0,
+        }];
+
+        let tree = build_file_tree(&files);
+        let flat = flatten_tree_with_state(&tree, 0, &std::collections::HashMap::new());
+
+        for entry in &flat {
+            assert_eq!(
+                entry.comment_count, 0,
+                "entry '{}' should have 0 comments",
+                entry.name
+            );
+        }
+    }
 }
