@@ -30,6 +30,25 @@ pub struct App {
     expanded_state: Rc<RefCell<HashMap<String, bool>>>,
 }
 
+/// Convert flat file entries to Slint FileEntry models, enriching with comment counts.
+fn build_file_entries(
+    flat_entries: &[crate::git::FlatFileEntry],
+    pr_comments: Option<&FileComments>,
+) -> Vec<FileEntry> {
+    flat_entries
+        .iter()
+        .map(|f| {
+            let mut model = FileEntryModel::from(f);
+            if let Some(comments) = pr_comments {
+                if let Some(file_comments) = comments.get(&f.path) {
+                    model.comment_count = file_comments.len() as i32;
+                }
+            }
+            model.into()
+        })
+        .collect()
+}
+
 impl App {
     pub fn new(args: Args) -> Result<Self> {
         let window = MainWindow::new().context("Failed to create window")?;
@@ -118,6 +137,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
+        let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_folder_toggled(move |path| {
             let window = window_weak.unwrap();
             let path_str = path.to_string();
@@ -134,11 +154,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            // Convert to UI models
-            let file_entries: Vec<FileEntry> = flat_entries
-                .iter()
-                .map(|f| FileEntryModel::from(f).into())
-                .collect();
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -243,11 +259,8 @@ impl App {
                 let tree = build_file_tree(&diff_data.files);
                 let flat_entries = flatten_tree_with_state(&tree, 0, &HashMap::new());
 
-                // Convert to UI models
-                let file_entries: Vec<FileEntry> = flat_entries
-                    .iter()
-                    .map(|f| FileEntryModel::from(f).into())
-                    .collect();
+                let file_entries =
+                    build_file_entries(&flat_entries, grouped_comments.as_ref());
 
                 let files_model = Rc::new(VecModel::from(file_entries));
                 window.set_files(ModelRc::from(files_model));
@@ -340,6 +353,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
+        let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_expand_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -357,10 +371,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries: Vec<FileEntry> = flat_entries
-                .iter()
-                .map(|f| FileEntryModel::from(f).into())
-                .collect();
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -370,6 +381,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
+        let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_collapse_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -387,10 +399,7 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries: Vec<FileEntry> = flat_entries
-                .iter()
-                .map(|f| FileEntryModel::from(f).into())
-                .collect();
+            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -400,6 +409,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
+        let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_toggle_focused_directory(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -422,10 +432,8 @@ impl App {
                     let state = expanded_state.borrow();
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-                    let file_entries: Vec<FileEntry> = flat_entries
-                        .iter()
-                        .map(|f| FileEntryModel::from(f).into())
-                        .collect();
+                    let file_entries =
+                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
@@ -437,6 +445,7 @@ impl App {
         let window_weak = self.window.as_weak();
         let file_tree = Rc::clone(&self.file_tree);
         let expanded_state = Rc::clone(&self.expanded_state);
+        let pr_comments = Rc::clone(&self.pr_comments);
         self.window.on_expand_focused_recursive(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -463,10 +472,8 @@ impl App {
                     let state = expanded_state.borrow();
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-                    let file_entries: Vec<FileEntry> = flat_entries
-                        .iter()
-                        .map(|f| FileEntryModel::from(f).into())
-                        .collect();
+                    let file_entries =
+                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref());
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
@@ -547,11 +554,7 @@ impl App {
         let flat_entries = flatten_tree_with_state(&tree, 0, &expanded_state);
         drop(expanded_state);
 
-        // Convert to UI models
-        let file_entries: Vec<FileEntry> = flat_entries
-            .iter()
-            .map(|f| FileEntryModel::from(f).into())
-            .collect();
+        let file_entries = build_file_entries(&flat_entries, self.pr_comments.borrow().as_ref());
 
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
