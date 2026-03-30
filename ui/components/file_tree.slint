@@ -14,6 +14,28 @@ component StatusBadge inherits Rectangle {
                 theme.status-modified;
 }
 
+// Comment count indicator
+component CommentBadge inherits HorizontalLayout {
+    in property <ThemeColors> theme;
+    in property <int> count;
+
+    spacing: 2px;
+    alignment: center;
+
+    Text {
+        text: "\u{1f4ac}";
+        font-size: 10px;
+        vertical-alignment: center;
+    }
+
+    Text {
+        text: count;
+        color: theme.comment-author;
+        font-size: 10px;
+        vertical-alignment: center;
+    }
+}
+
 // Individual file/folder item
 component TreeItem inherits Rectangle {
     in property <ThemeColors> theme;
@@ -23,6 +45,7 @@ component TreeItem inherits Rectangle {
     in property <bool> is-folder;
     in property <bool> is-expanded: true;
     in property <string> status: "modified";
+    in property <int> comment-count: 0;
     in property <bool> selected: false;
     in property <bool> focused: false;
 
@@ -90,6 +113,12 @@ component TreeItem inherits Rectangle {
 
         Rectangle { }
 
+        // Comment count badge for files with comments
+        if !is-folder && comment-count > 0: CommentBadge {
+            theme: root.theme;
+            count: root.comment-count;
+        }
+
         // Status badge for files
         if !is-folder: StatusBadge {
             theme: root.theme;
@@ -156,6 +185,7 @@ export component FileTree inherits Rectangle {
                     is-folder: file.is-folder;
                     is-expanded: file.is-expanded;
                     status: file.status;
+                    comment-count: file.comment-count;
                     selected: file.path == selected-file;
                     focused: idx == root.focused-index;
 
