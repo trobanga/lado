@@ -9,6 +9,7 @@ pub struct FileEntryModel {
     pub is_folder: bool,
     pub is_expanded: bool,
     pub status: String,
+    pub comment_count: i32,
 }
 
 impl From<&FlatFileEntry> for FileEntryModel {
@@ -20,6 +21,7 @@ impl From<&FlatFileEntry> for FileEntryModel {
             is_folder: entry.is_folder,
             is_expanded: entry.is_expanded,
             status: entry.status.clone(),
+            comment_count: entry.comment_count,
         }
     }
 }
@@ -33,6 +35,7 @@ impl From<FileEntryModel> for FileEntry {
             is_folder: model.is_folder,
             is_expanded: model.is_expanded,
             status: model.status.into(),
+            comment_count: model.comment_count,
         }
     }
 }

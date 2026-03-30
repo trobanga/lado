@@ -167,6 +167,7 @@ pub fn flatten_tree_with_state(
             is_folder: node.is_folder,
             is_expanded,
             status: node.status.clone().unwrap_or_else(|| "modified".to_string()),
+            comment_count: 0,
         });
 
         // Only recurse into children if the folder is expanded
@@ -187,6 +188,7 @@ pub struct FlatFileEntry {
     pub is_folder: bool,
     pub is_expanded: bool,
     pub status: String,
+    pub comment_count: i32,
 }
 
 /// Collect all folder paths from a file tree (for bulk expand/collapse operations)
