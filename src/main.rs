@@ -6,6 +6,7 @@ mod github;
 mod highlighting;
 mod models;
 mod ui;
+mod viewed_state;
 
 use anyhow::Result;
 use clap::Parser;
