@@ -67,6 +67,7 @@ export component MainWindow inherits Window {
     callback collapse-all-directories();
     callback toggle-focused-directory();
     callback expand-focused-recursive();
+    callback toggle-viewed(/* index */ int);
 
     init => {
         main-focus.focus();

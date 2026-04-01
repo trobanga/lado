@@ -6,6 +6,7 @@ use crate::git::{
 use crate::github::{self, FileComments, PrCommit};
 use crate::highlighting::Highlighter;
 use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
+use crate::viewed_state::{self, ViewedState};
 use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
@@ -28,6 +29,10 @@ pub struct App {
     file_tree: Rc<RefCell<Vec<FileTreeNode>>>,
     /// Expanded state for folders (path -> is_expanded)
     expanded_state: Rc<RefCell<HashMap<String, bool>>>,
+    /// Persisted per-file viewed state
+    viewed_state: Rc<RefCell<ViewedState>>,
+    /// Key derived from diff target for viewed state persistence
+    target_key: String,
 }
 
 /// Count comments that actually match a diff line for a given file.
@@ -71,6 +76,7 @@ fn build_file_entries(
     flat_entries: &[crate::git::FlatFileEntry],
     pr_comments: Option<&FileComments>,
     diff_data: Option<&DiffData>,
+    viewed_state: Option<(&ViewedState, &str)>,
 ) -> Vec<FileEntry> {
     flat_entries
         .iter()
@@ -83,6 +89,19 @@ fn build_file_entries(
                         Some(h) => count_matching_comments(h, file_comments),
                         None => 0,
                     };
+                }
+            }
+            // Apply viewed state from persistence
+            if let Some((vs, tk)) = viewed_state {
+                if !f.is_folder {
+                    if let Some(data) = diff_data {
+                        let hash = data
+                            .file_hunks
+                            .get(&f.path)
+                            .map(|h| viewed_state::hash_diff_content(h))
+                            .unwrap_or(0);
+                        model.viewed = vs.is_viewed(tk, &f.path, hash);
+                    }
                 }
             }
             model.into()
@@ -132,6 +151,9 @@ impl App {
         let mut highlighter = Highlighter::new();
         highlighter.set_theme(config.ui_theme.as_str());
 
+        let viewed_state = Rc::new(RefCell::new(ViewedState::load()));
+        let target_key = viewed_state::target_key(&target);
+
         let app = Self {
             window,
             repo,
@@ -145,6 +167,8 @@ impl App {
             highlighter: Rc::new(RefCell::new(highlighter)),
             file_tree: Rc::new(RefCell::new(Vec::new())),
             expanded_state: Rc::new(RefCell::new(HashMap::new())),
+            viewed_state,
+            target_key,
         };
 
         app.setup_callbacks()?;
@@ -180,6 +204,8 @@ impl App {
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
         let diff_data = Rc::clone(&self.diff_data);
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
         self.window.on_folder_toggled(move |path| {
             let window = window_weak.unwrap();
             let path_str = path.to_string();
@@ -196,7 +222,12 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
+            let file_entries = build_file_entries(
+                &flat_entries,
+                pr_comments.borrow().as_ref(),
+                diff_data.borrow().as_ref(),
+                Some((&viewed_state.borrow(), &target_key)),
+            );
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -302,7 +333,7 @@ impl App {
                 let flat_entries = flatten_tree_with_state(&tree, 0, &HashMap::new());
 
                 let file_entries =
-                    build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data));
+                    build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data), None);
 
                 let files_model = Rc::new(VecModel::from(file_entries));
                 window.set_files(ModelRc::from(files_model));
@@ -377,7 +408,7 @@ impl App {
             let mut idx = current_idx + direction;
             while idx >= 0 && idx < len {
                 if let Some(file) = files.row_data(idx as usize) {
-                    if !file.is_folder {
+                    if !file.is_folder && !file.viewed {
                         return idx;
                     }
                 }
@@ -397,6 +428,8 @@ impl App {
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
         let diff_data = Rc::clone(&self.diff_data);
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
         self.window.on_expand_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -414,7 +447,12 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
+            let file_entries = build_file_entries(
+                &flat_entries,
+                pr_comments.borrow().as_ref(),
+                diff_data.borrow().as_ref(),
+                Some((&viewed_state.borrow(), &target_key)),
+            );
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -426,6 +464,8 @@ impl App {
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
         let diff_data = Rc::clone(&self.diff_data);
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
         self.window.on_collapse_all_directories(move || {
             let window = window_weak.unwrap();
             let tree = file_tree.borrow();
@@ -443,7 +483,12 @@ impl App {
             let state = expanded_state.borrow();
             let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-            let file_entries = build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
+            let file_entries = build_file_entries(
+                &flat_entries,
+                pr_comments.borrow().as_ref(),
+                diff_data.borrow().as_ref(),
+                Some((&viewed_state.borrow(), &target_key)),
+            );
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -455,6 +500,8 @@ impl App {
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
         let diff_data = Rc::clone(&self.diff_data);
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
         self.window.on_toggle_focused_directory(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -477,8 +524,12 @@ impl App {
                     let state = expanded_state.borrow();
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-                    let file_entries =
-                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
+                    let file_entries = build_file_entries(
+                        &flat_entries,
+                        pr_comments.borrow().as_ref(),
+                        diff_data.borrow().as_ref(),
+                        Some((&viewed_state.borrow(), &target_key)),
+                    );
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
@@ -492,6 +543,8 @@ impl App {
         let expanded_state = Rc::clone(&self.expanded_state);
         let pr_comments = Rc::clone(&self.pr_comments);
         let diff_data = Rc::clone(&self.diff_data);
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
         self.window.on_expand_focused_recursive(move || {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -518,12 +571,62 @@ impl App {
                     let state = expanded_state.borrow();
                     let flat_entries = flatten_tree_with_state(&tree, 0, &state);
 
-                    let file_entries =
-                        build_file_entries(&flat_entries, pr_comments.borrow().as_ref(), diff_data.borrow().as_ref());
+                    let file_entries = build_file_entries(
+                        &flat_entries,
+                        pr_comments.borrow().as_ref(),
+                        diff_data.borrow().as_ref(),
+                        Some((&viewed_state.borrow(), &target_key)),
+                    );
 
                     let files_model = Rc::new(VecModel::from(file_entries));
                     window.set_files(ModelRc::from(files_model));
                 }
+            }
+        });
+
+        // Toggle viewed state callback
+        let window_weak = self.window.as_weak();
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
+        let diff_data = Rc::clone(&self.diff_data);
+        self.window.on_toggle_viewed(move |idx| {
+            let window = window_weak.unwrap();
+            let files = window.get_files();
+
+            if let Some(entry) = files.row_data(idx as usize) {
+                if entry.is_folder {
+                    return;
+                }
+
+                let path = entry.path.to_string();
+                let mut vs = viewed_state.borrow_mut();
+                let tk = &target_key;
+
+                if entry.viewed {
+                    vs.set_unviewed(tk, &path);
+                } else {
+                    let data = diff_data.borrow();
+                    let hash = data
+                        .as_ref()
+                        .and_then(|d| d.file_hunks.get(&path))
+                        .map(|h| viewed_state::hash_diff_content(h))
+                        .unwrap_or(0);
+                    vs.set_viewed(tk, &path, hash);
+                }
+
+                if let Err(e) = vs.save() {
+                    eprintln!("Warning: Could not save viewed state: {}", e);
+                }
+                drop(vs);
+
+                // Toggle in the UI model directly
+                let model = files
+                    .as_any()
+                    .downcast_ref::<VecModel<FileEntry>>()
+                    .unwrap();
+                let mut updated = entry.clone();
+                updated.viewed = !entry.viewed;
+                model.set_row_data(idx as usize, updated);
             }
         });
 
@@ -600,7 +703,12 @@ impl App {
         let flat_entries = flatten_tree_with_state(&tree, 0, &expanded_state);
         drop(expanded_state);
 
-        let file_entries = build_file_entries(&flat_entries, self.pr_comments.borrow().as_ref(), Some(&diff_data));
+        let file_entries = build_file_entries(
+            &flat_entries,
+            self.pr_comments.borrow().as_ref(),
+            Some(&diff_data),
+            Some((&self.viewed_state.borrow(), &self.target_key)),
+        );
 
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
