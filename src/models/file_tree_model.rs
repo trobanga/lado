@@ -10,6 +10,7 @@ pub struct FileEntryModel {
     pub is_expanded: bool,
     pub status: String,
     pub comment_count: i32,
+    pub viewed: bool,
 }
 
 impl From<&FlatFileEntry> for FileEntryModel {
@@ -22,6 +23,7 @@ impl From<&FlatFileEntry> for FileEntryModel {
             is_expanded: entry.is_expanded,
             status: entry.status.clone(),
             comment_count: entry.comment_count,
+            viewed: entry.viewed,
         }
     }
 }
@@ -36,6 +38,7 @@ impl From<FileEntryModel> for FileEntry {
             is_expanded: model.is_expanded,
             status: model.status.into(),
             comment_count: model.comment_count,
+            viewed: model.viewed,
         }
     }
 }
