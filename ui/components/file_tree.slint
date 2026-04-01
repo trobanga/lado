@@ -48,9 +48,11 @@ component TreeItem inherits Rectangle {
     in property <int> comment-count: 0;
     in property <bool> selected: false;
     in property <bool> focused: false;
+    in property <bool> viewed: false;
 
     callback clicked;
     callback toggle-expand;
+    callback toggle-viewed;
 
     height: 28px;
     background: selected ? theme.bg-selected :
@@ -102,10 +104,34 @@ component TreeItem inherits Rectangle {
             opacity: 0.3;
         }
 
+        // Viewed checkbox for files
+        if !is-folder: Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: viewed ? theme.status-added : theme.border-normal;
+            background: viewed ? theme.status-added.with-alpha(0.2) : transparent;
+
+            Text {
+                text: viewed ? "✓" : "";
+                color: theme.status-added;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggle-viewed(); }
+            }
+        }
+
         // Name
         Text {
             text: name;
-            color: selected ? theme.text-primary : theme.text-secondary;
+            color: viewed ? theme.text-muted :
+                   selected ? theme.text-primary : theme.text-secondary;
             font-size: 13px;
             vertical-alignment: center;
             overflow: elide;
@@ -146,6 +172,7 @@ export component FileTree inherits Rectangle {
 
     callback file-clicked(/* path */ string, /* index */ int);
     callback folder-toggled(/* path */ string);
+    callback viewed-toggled(/* index */ int);
 
     background: transparent;
 
@@ -186,6 +213,7 @@ export component FileTree inherits Rectangle {
                     is-expanded: file.is-expanded;
                     status: file.status;
                     comment-count: file.comment-count;
+                    viewed: file.viewed;
                     selected: file.path == selected-file;
                     focused: idx == root.focused-index;
 
@@ -197,6 +225,10 @@ export component FileTree inherits Rectangle {
 
                     toggle-expand => {
                         root.folder-toggled(file.path);
+                    }
+
+                    toggle-viewed => {
+                        root.viewed-toggled(idx);
                     }
                 }
             }

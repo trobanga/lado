@@ -1,0 +1,193 @@
+import { ThemeColors } from "../theme.slint";
+import { AppSettings } from "settings_panel.slint";
+
+component KeyRow inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <string> key;
+    in property <string> description;
+
+    height: 28px;
+
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 16px;
+
+        // Key badge
+        Rectangle {
+            width: 48px;
+            height: 22px;
+            border-radius: 4px;
+            background: theme.bg-tertiary;
+            border-width: 1px;
+            border-color: theme.border-normal;
+
+            Text {
+                text: key;
+                color: theme.text-primary;
+                font-size: 12px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-family: "monospace";
+            }
+        }
+
+        Text {
+            text: description;
+            color: theme.text-secondary;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component SectionHeader inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <string> title;
+
+    height: 32px;
+
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-top: 8px;
+
+        Text {
+            text: title;
+            color: theme.text-muted;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component HelpOverlay inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <AppSettings> settings;
+    in-out property <bool> visible: false;
+
+    callback close();
+
+    // Full-screen backdrop
+    opacity: visible ? 1.0 : 0.0;
+    visible: self.opacity > 0;
+    background: #000000.with-alpha(0.5);
+
+    animate opacity { duration: 150ms; }
+
+    // Backdrop click closes
+    TouchArea {
+        clicked => { root.close(); }
+    }
+
+    // Centered card
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(480px, parent.width - 80px);
+        height: min(520px, parent.height - 80px);
+        background: theme.bg-secondary;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: theme.border-normal;
+        clip: true;
+
+        // Prevent backdrop click from closing when clicking the card
+        TouchArea { }
+
+        VerticalLayout {
+            // Header
+            Rectangle {
+                height: 48px;
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 16px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "Keyboard Shortcuts";
+                        color: theme.text-primary;
+                        font-size: 15px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    // Close button
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: close-ta.has-hover ? theme.bg-hover : transparent;
+
+                        Text {
+                            text: "✕";
+                            color: theme.text-muted;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        close-ta := TouchArea {
+                            clicked => { root.close(); }
+                        }
+                    }
+                }
+            }
+
+            // Separator
+            Rectangle {
+                height: 1px;
+                background: theme.border-subtle;
+            }
+
+            // Scrollable content
+            Flickable {
+                viewport-height: 480px;
+
+                VerticalLayout {
+                    spacing: 0px;
+
+                    SectionHeader { theme: root.theme; title: "NAVIGATION"; }
+                    KeyRow { theme: root.theme; key: settings.key-scroll-down; description: "Scroll diff down"; }
+                    KeyRow { theme: root.theme; key: settings.key-scroll-up; description: "Scroll diff up"; }
+                    KeyRow { theme: root.theme; key: settings.key-file-next; description: "Next file (skip viewed)"; }
+                    KeyRow { theme: root.theme; key: settings.key-file-prev; description: "Previous file (skip viewed)"; }
+                    KeyRow { theme: root.theme; key: settings.key-prev-commit; description: "Previous commit"; }
+                    KeyRow { theme: root.theme; key: settings.key-next-commit; description: "Next commit"; }
+                    KeyRow { theme: root.theme; key: "Enter"; description: "Select focused file"; }
+
+                    SectionHeader { theme: root.theme; title: "VIEW"; }
+                    KeyRow { theme: root.theme; key: settings.key-unified; description: "Unified diff view"; }
+                    KeyRow { theme: root.theme; key: settings.key-side-by-side; description: "Side-by-side diff view"; }
+
+                    SectionHeader { theme: root.theme; title: "FILE TREE"; }
+                    KeyRow { theme: root.theme; key: "e"; description: "Toggle expand/collapse folder"; }
+                    KeyRow { theme: root.theme; key: "E"; description: "Expand all directories"; }
+                    KeyRow { theme: root.theme; key: "c"; description: "Collapse all directories"; }
+                    KeyRow { theme: root.theme; key: "C"; description: "Expand folder recursively"; }
+                    KeyRow { theme: root.theme; key: "v"; description: "Toggle file as viewed"; }
+
+                    SectionHeader { theme: root.theme; title: "OTHER"; }
+                    KeyRow { theme: root.theme; key: "F11"; description: "Toggle fullscreen"; }
+                    KeyRow { theme: root.theme; key: "?"; description: "Toggle this help"; }
+
+                    // Footer
+                    Rectangle {
+                        height: 40px;
+
+                        Text {
+                            text: "lado v0.1.0";
+                            color: theme.text-muted;
+                            font-size: 10px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

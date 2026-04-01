@@ -180,6 +180,12 @@ export component MainWindow inherits Window {
                 return accept;
             }
 
+            // v - toggle viewed on focused file
+            if (event.text == "v") {
+                root.toggle-viewed(root.focused-index);
+                return accept;
+            }
+
             reject
         }
 
@@ -243,6 +249,9 @@ export component MainWindow inherits Window {
                             }
                             folder-toggled(path) => {
                                 root.folder-toggled(path);
+                            }
+                            viewed-toggled(idx) => {
+                                root.toggle-viewed(idx);
                             }
                         }
                     }
