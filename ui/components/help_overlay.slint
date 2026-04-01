@@ -66,13 +66,13 @@ component SectionHeader inherits Rectangle {
 export component HelpOverlay inherits Rectangle {
     in property <ThemeColors> theme;
     in property <AppSettings> settings;
-    in-out property <bool> visible: false;
+    in-out property <bool> show: false;
 
     callback close();
 
     // Full-screen backdrop
-    opacity: visible ? 1.0 : 0.0;
-    visible: self.opacity > 0;
+    opacity: show ? 1.0 : 0.0;
+    visible: show;
     background: #000000.with-alpha(0.5);
 
     animate opacity { duration: 150ms; }

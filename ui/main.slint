@@ -5,6 +5,7 @@ import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
 import { CommitList } from "components/commit_list.slint";
 import { SettingsPanel, AppSettings } from "components/settings_panel.slint";
+import { HelpOverlay } from "components/help_overlay.slint";
 
 // Re-export structs for Rust access
 export { FileEntry, DiffLine, PrCommitEntry, TextSpan, AppSettings, ThemeColors }
@@ -34,6 +35,7 @@ export component MainWindow inherits Window {
     in-out property <[PrCommitEntry]> commits: [];
     in-out property <int> selected-commit-index: -1;
     in-out property <bool> settings-visible: false;
+    in-out property <bool> help-visible: false;
     in-out property <length> left-panel-width: 280px;
     in-out property <AppSettings> app-settings: {
         ui-theme: "dark",
@@ -88,8 +90,21 @@ export component MainWindow inherits Window {
                 return accept;
             }
 
-            // Skip keyboard navigation when settings panel is open
-            if (root.settings-visible) {
+            // ? toggles help overlay
+            if (event.text == "?") {
+                root.help-visible = !root.help-visible;
+                return accept;
+            }
+            // Escape closes help overlay
+            if (event.text == Key.Escape) {
+                if (root.help-visible) {
+                    root.help-visible = false;
+                    return accept;
+                }
+            }
+
+            // Skip keyboard navigation when settings panel or help overlay is open
+            if (root.settings-visible || root.help-visible) {
                 return reject;
             }
 
@@ -332,6 +347,18 @@ export component MainWindow inherits Window {
         }
         close-panel => {
             root.settings-visible = false;
+        }
+    }
+
+    // Help overlay (centered, on top of everything)
+    HelpOverlay {
+        width: root.width;
+        height: root.height;
+        theme: root.theme;
+        settings: root.app-settings;
+        show: root.help-visible;
+        close => {
+            root.help-visible = false;
         }
     }
 }
