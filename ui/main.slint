@@ -284,6 +284,11 @@ export component MainWindow inherits Window {
                     lines: root.lines;
                     font-size: root.app-settings.font-size * 1px;
                     scroll-step: root.scroll-step;
+                    viewed: root.focused-index >= 0 && root.focused-index < root.files.length
+                            ? root.files[root.focused-index].viewed : false;
+                    toggle-viewed => {
+                        root.toggle-viewed(root.focused-index);
+                    }
                 }
 
                 // Draggable splitter (last child = on top for hit-testing)
