@@ -70,6 +70,20 @@ component TreeItem inherits Rectangle {
         background: theme.accent-primary;
     }
 
+    // Row-level click handler — declared before the HorizontalLayout so that
+    // inner per-cell TouchAreas (folder expand, viewed checkbox) sit on top
+    // in z-order and receive clicks first.
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (root.is-folder) {
+                root.toggle-expand();
+            } else {
+                root.clicked();
+            }
+        }
+    }
+
     HorizontalLayout {
         padding-left: 12px + (depth * 16px);
         padding-right: 12px;
@@ -80,6 +94,7 @@ component TreeItem inherits Rectangle {
         if is-folder: Rectangle {
             width: 16px;
             height: 16px;
+            y: (parent.height - self.height) / 2;
 
             Text {
                 text: is-expanded ? "v" : ">";
@@ -99,6 +114,7 @@ component TreeItem inherits Rectangle {
         Rectangle {
             width: 16px;
             height: 16px;
+            y: (parent.height - self.height) / 2;
             background: is-folder ? theme.accent-secondary : transparent;
             border-radius: 2px;
             opacity: 0.3;
@@ -108,6 +124,7 @@ component TreeItem inherits Rectangle {
         if !is-folder: Rectangle {
             width: 16px;
             height: 16px;
+            y: (parent.height - self.height) / 2;
             border-radius: 3px;
             border-width: 1px;
             border-color: viewed ? theme.status-added : theme.border-normal;
@@ -149,17 +166,6 @@ component TreeItem inherits Rectangle {
         if !is-folder: StatusBadge {
             theme: root.theme;
             status: root.status;
-        }
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            if (root.is-folder) {
-                root.toggle-expand();
-            } else {
-                root.clicked();
-            }
         }
     }
 }

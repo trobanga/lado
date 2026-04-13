@@ -109,6 +109,35 @@ fn build_file_entries(
         .collect()
 }
 
+/// Pick the initial focus row: first unviewed non-folder, else first non-folder, else -1.
+/// Matches J/K navigation semantics (which skips folders and viewed files).
+fn find_initial_focus_index(entries: &[FileEntry]) -> i32 {
+    entries
+        .iter()
+        .position(|e| !e.is_folder && !e.viewed)
+        .or_else(|| entries.iter().position(|e| !e.is_folder))
+        .map(|i| i as i32)
+        .unwrap_or(-1)
+}
+
+/// Look up the viewed status of a file by path, independent of the file tree
+/// model. Used to keep the diff header's checkbox correct even when the file
+/// is hidden by a collapsed ancestor.
+fn is_path_viewed(
+    path: &str,
+    viewed: &ViewedState,
+    diff_data: Option<&DiffData>,
+    target_key: &str,
+) -> bool {
+    let Some(data) = diff_data else { return false };
+    let hash = data
+        .file_hunks
+        .get(path)
+        .map(|h| viewed_state::hash_diff_content(h))
+        .unwrap_or(0);
+    viewed.is_viewed(target_key, path, hash)
+}
+
 impl App {
     pub fn new(args: Args) -> Result<Self> {
         let window = MainWindow::new().context("Failed to create window")?;
@@ -182,20 +211,30 @@ impl App {
         let diff_data = Rc::clone(&self.diff_data);
         let pr_comments = Rc::clone(&self.pr_comments);
         let highlighter = Rc::clone(&self.highlighter);
+        let viewed_state_for_select = Rc::clone(&self.viewed_state);
+        let target_key_for_select = self.target_key.clone();
 
         // File selection callback
         self.window.on_file_selected(move |path| {
             let window = window_weak.unwrap();
             let path_str = path.to_string();
 
-            if let Some(ref data) = *diff_data.borrow() {
+            let data_borrow = diff_data.borrow();
+            if let Some(ref data) = *data_borrow {
                 let comments = pr_comments.borrow();
                 let hl = highlighter.borrow();
                 let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl);
                 window.set_lines(lines);
             }
 
+            let viewed = is_path_viewed(
+                &path_str,
+                &viewed_state_for_select.borrow(),
+                data_borrow.as_ref(),
+                &target_key_for_select,
+            );
             window.set_selected_file(path);
+            window.set_selected_file_viewed(viewed);
         });
 
         // Folder toggle callback for collapsing/expanding directories
@@ -214,7 +253,7 @@ impl App {
             {
                 let mut state = expanded_state.borrow_mut();
                 let is_expanded = state.get(&path_str).copied().unwrap_or(true);
-                state.insert(path_str, !is_expanded);
+                state.insert(path_str.clone(), !is_expanded);
             }
 
             // Re-flatten the tree with updated expanded state
@@ -228,6 +267,19 @@ impl App {
                 diff_data.borrow().as_ref(),
                 Some((&viewed_state.borrow(), &target_key)),
             );
+
+            // The re-flatten invalidated focused-index (rows shifted). Re-anchor it
+            // to the currently-selected file so the header's viewed indicator stays
+            // correct. If the selected file is now hidden (ancestor collapsed),
+            // fall back to the toggled folder row so focus stays visible.
+            let selected = window.get_selected_file().to_string();
+            let new_focus = flat_entries
+                .iter()
+                .position(|e| e.path == selected)
+                .or_else(|| flat_entries.iter().position(|e| e.path == path_str))
+                .map(|i| i as i32)
+                .unwrap_or(-1);
+            window.set_focused_index(new_focus);
 
             let files_model = Rc::new(VecModel::from(file_entries));
             window.set_files(ModelRc::from(files_model));
@@ -335,20 +387,33 @@ impl App {
                 let file_entries =
                     build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data), None);
 
+                let initial_focus = find_initial_focus_index(&file_entries);
+                let initial_viewed = if initial_focus >= 0 {
+                    file_entries
+                        .get(initial_focus as usize)
+                        .map(|e| e.viewed)
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
                 let files_model = Rc::new(VecModel::from(file_entries));
                 window.set_files(ModelRc::from(files_model));
 
-                // If there are files, select the first file (not folder) and load its diff
-                if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
-                    window.set_selected_file(first_file.path.clone().into());
-                    let hl = highlighter.borrow();
-                    let lines = get_lines_for_file(
-                        &diff_data,
-                        &first_file.path,
-                        grouped_comments.as_ref(),
-                        &hl,
-                    );
-                    window.set_lines(lines);
+                if initial_focus >= 0 {
+                    if let Some(initial) = flat_entries.get(initial_focus as usize) {
+                        window.set_focused_index(initial_focus);
+                        window.set_selected_file(initial.path.clone().into());
+                        window.set_selected_file_viewed(initial_viewed);
+                        let hl = highlighter.borrow();
+                        let lines = get_lines_for_file(
+                            &diff_data,
+                            &initial.path,
+                            grouped_comments.as_ref(),
+                            &hl,
+                        );
+                        window.set_lines(lines);
+                    }
                 }
             }
         });
@@ -627,6 +692,65 @@ impl App {
                 let mut updated = entry.clone();
                 updated.viewed = !entry.viewed;
                 model.set_row_data(idx as usize, updated);
+
+                // If the toggled file is the one currently displayed, keep the
+                // diff header's checkbox in sync.
+                if window.get_selected_file().to_string() == path {
+                    window.set_selected_file_viewed(!entry.viewed);
+                }
+            }
+        });
+
+        // Toggle viewed state for the currently-displayed file (works even when
+        // the file is hidden from the tree by a collapsed ancestor).
+        let window_weak = self.window.as_weak();
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
+        let diff_data = Rc::clone(&self.diff_data);
+        self.window.on_toggle_selected_viewed(move || {
+            let window = window_weak.unwrap();
+            let path = window.get_selected_file().to_string();
+            if path.is_empty() {
+                return;
+            }
+
+            let mut vs = viewed_state.borrow_mut();
+            let data_borrow = diff_data.borrow();
+            let was_viewed = is_path_viewed(&path, &vs, data_borrow.as_ref(), &target_key);
+
+            if was_viewed {
+                vs.set_unviewed(&target_key, &path);
+            } else {
+                let hash = data_borrow
+                    .as_ref()
+                    .and_then(|d| d.file_hunks.get(&path))
+                    .map(|h| viewed_state::hash_diff_content(h))
+                    .unwrap_or(0);
+                vs.set_viewed(&target_key, &path, hash);
+            }
+
+            if let Err(e) = vs.save() {
+                eprintln!("Warning: Could not save viewed state: {}", e);
+            }
+            drop(vs);
+            drop(data_borrow);
+
+            window.set_selected_file_viewed(!was_viewed);
+
+            // If the toggled file is currently visible in the tree, also update
+            // the per-row entry so its checkbox reflects the new state.
+            let files = window.get_files();
+            if let Some(model) = files.as_any().downcast_ref::<VecModel<FileEntry>>() {
+                for i in 0..model.row_count() {
+                    if let Some(entry) = model.row_data(i) {
+                        if entry.path.to_string() == path {
+                            let mut updated = entry.clone();
+                            updated.viewed = !was_viewed;
+                            model.set_row_data(i, updated);
+                            break;
+                        }
+                    }
+                }
             }
         });
 
@@ -710,16 +834,30 @@ impl App {
             Some((&self.viewed_state.borrow(), &self.target_key)),
         );
 
+        // Pick the initial focus row before moving file_entries into the model.
+        let initial_focus = find_initial_focus_index(&file_entries);
+
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
 
-        // If there are files, select the first file (not folder) and load its diff
-        if let Some(first_file) = flat_entries.iter().find(|e| !e.is_folder) {
-            self.window.set_selected_file(first_file.path.clone().into());
-            let comments = self.pr_comments.borrow();
-            let hl = self.highlighter.borrow();
-            let lines = get_lines_for_file(&diff_data, &first_file.path, comments.as_ref(), &hl);
-            self.window.set_lines(lines);
+        // Load the diff for the initial focus row and keep focused-index in sync
+        // with selected-file so the header "viewed" state is driven by the same row.
+        if initial_focus >= 0 {
+            if let Some(initial) = flat_entries.get(initial_focus as usize) {
+                self.window.set_focused_index(initial_focus);
+                self.window.set_selected_file(initial.path.clone().into());
+                let viewed = is_path_viewed(
+                    &initial.path,
+                    &self.viewed_state.borrow(),
+                    Some(&diff_data),
+                    &self.target_key,
+                );
+                self.window.set_selected_file_viewed(viewed);
+                let comments = self.pr_comments.borrow();
+                let hl = self.highlighter.borrow();
+                let lines = get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl);
+                self.window.set_lines(lines);
+            }
         }
 
         // Store for later use in callbacks

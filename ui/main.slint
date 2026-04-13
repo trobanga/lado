@@ -53,6 +53,10 @@ export component MainWindow inherits Window {
         key-next-commit: "]",
     };
     in-out property <int> focused-index: 0;
+    // Viewed state of the file currently shown in the diff view. Driven by
+    // selected-file (a path), not focused-index, so it stays correct even when
+    // the selected file is hidden from the tree (e.g. by collapsing an ancestor).
+    in-out property <bool> selected-file-viewed: false;
 
     // Callbacks for Rust integration
     callback file-selected(string);
@@ -70,6 +74,10 @@ export component MainWindow inherits Window {
     callback toggle-focused-directory();
     callback expand-focused-recursive();
     callback toggle-viewed(/* index */ int);
+    // Toggle the viewed state of the currently-displayed file (selected-file).
+    // Used by the diff view header so it works even when the file is hidden
+    // from the tree by a collapsed ancestor.
+    callback toggle-selected-viewed();
 
     init => {
         main-focus.focus();
@@ -284,10 +292,9 @@ export component MainWindow inherits Window {
                     lines: root.lines;
                     font-size: root.app-settings.font-size * 1px;
                     scroll-step: root.scroll-step;
-                    viewed: root.focused-index >= 0 && root.focused-index < root.files.length
-                            ? root.files[root.focused-index].viewed : false;
+                    viewed: root.selected-file-viewed;
                     toggle-viewed => {
-                        root.toggle-viewed(root.focused-index);
+                        root.toggle-selected-viewed();
                     }
                 }
 

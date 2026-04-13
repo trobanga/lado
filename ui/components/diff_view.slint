@@ -79,6 +79,7 @@ export component DiffView inherits Rectangle {
                     Rectangle {
                         width: 16px;
                         height: 16px;
+                        y: (parent.height - self.height) / 2;
                         border-radius: 3px;
                         border-width: 1px;
                         border-color: root.viewed ? theme.status-added : theme.border-normal;
