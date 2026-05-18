@@ -5,7 +5,7 @@ export struct AppSettings {
     ui-theme: string,       // "dark", "light", "solarized-dark", "solarized-light"
     font-size: int,
     tab-width: int,
-    line-wrap: bool,
+    line-wrap-column: int,  // 0 = no wrap, else target column width
     // Keybindings
     key-unified: string,      // default: "u"
     key-side-by-side: string, // default: "s"
@@ -478,7 +478,7 @@ export component SettingsPanel inherits Rectangle {
         ui-theme: "dark",
         font-size: 13,
         tab-width: 4,
-        line-wrap: false,
+        line-wrap-column: 100,
         key-unified: "u",
         key-side-by-side: "s",
         key-scroll-down: "j",
@@ -491,6 +491,11 @@ export component SettingsPanel inherits Rectangle {
 
     callback settings-changed(AppSettings);
     callback close-panel();
+
+    // Last non-zero wrap width — restored when the toggle goes off→on so the
+    // user's chosen column doesn't get clobbered by the default.
+    property <int> wrap-column-remembered: root.settings.line-wrap-column > 0
+        ? root.settings.line-wrap-column : 100;
 
     // UI theme options mapping
     property <[string]> ui-theme-options: ["Dark", "Light", "Solarized Dark", "Solarized Light"];
@@ -592,7 +597,7 @@ export component SettingsPanel inherits Rectangle {
 
         // Scrollable settings content
         Flickable {
-            viewport-height: 850px;
+            viewport-height: 870px;
 
             VerticalLayout {
                 spacing: 16px;
@@ -650,13 +655,57 @@ export component SettingsPanel inherits Rectangle {
                         }
                     }
 
-                    wrap := ToggleSwitch {
+                    wrap-toggle := ToggleSwitch {
                         theme: root.theme;
                         label: "Line Wrapping";
-                        checked: root.settings.line-wrap;
+                        checked: root.settings.line-wrap-column > 0;
                         toggled(val) => {
-                            root.settings.line-wrap = val;
+                            root.settings.line-wrap-column = val ? root.wrap-column-remembered : 0;
                             root.settings-changed(root.settings);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        height: 32px;
+                        alignment: space-between;
+
+                        Text {
+                            text: "Wrap Width";
+                            color: theme.text-secondary;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            letter-spacing: 0.5px;
+                        }
+
+                        Rectangle {
+                            width: 80px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            background: theme.bg-primary;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: wrap-input.has-focus ? theme.accent-primary : theme.border-normal;
+
+                            wrap-input := TextInput {
+                                text: root.wrap-column-remembered;
+                                color: theme.text-primary;
+                                font-size: 12px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                single-line: true;
+                                input-type: number;
+                                accepted => {
+                                    self.clear-focus();
+                                }
+                                edited => {
+                                    root.wrap-column-remembered = clamp(self.text.to-float(), 10, 999);
+                                    if (root.settings.line-wrap-column > 0) {
+                                        root.settings.line-wrap-column = root.wrap-column-remembered;
+                                        root.settings-changed(root.settings);
+                                    }
+                                }
+                            }
                         }
                     }
                 }

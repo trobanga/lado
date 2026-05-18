@@ -39,10 +39,9 @@ export component MainWindow inherits Window {
     in-out property <length> left-panel-width: 280px;
     in-out property <AppSettings> app-settings: {
         ui-theme: "dark",
-        syntax-theme: "base16-ocean.dark",
         font-size: 13,
         tab-width: 4,
-        line-wrap: false,
+        line-wrap-column: 100,
         key-unified: "u",
         key-side-by-side: "s",
         key-scroll-down: "j",

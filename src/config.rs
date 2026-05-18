@@ -12,7 +12,8 @@ pub struct Config {
     pub ui_theme: String,
     pub font_size: i32,
     pub tab_width: i32,
-    pub line_wrap: bool,
+    /// Column at which to wrap long diff lines. 0 = no wrap.
+    pub line_wrap_column: i32,
     pub panel_width: f32,
     // Keybindings
     pub key_unified: String,
@@ -31,7 +32,7 @@ impl Default for Config {
             ui_theme: "dark".to_string(),
             font_size: 14,
             tab_width: 4,
-            line_wrap: false,
+            line_wrap_column: 100,
             panel_width: 280.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
@@ -92,7 +93,7 @@ mod tests {
         assert_eq!(config.ui_theme, "dark");
         assert_eq!(config.font_size, 14);
         assert_eq!(config.tab_width, 4);
-        assert!(!config.line_wrap);
+        assert_eq!(config.line_wrap_column, 100);
     }
 
     #[test]
@@ -101,7 +102,7 @@ mod tests {
             ui_theme: "light".to_string(),
             font_size: 16,
             tab_width: 2,
-            line_wrap: true,
+            line_wrap_column: 120,
             panel_width: 300.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
@@ -131,7 +132,7 @@ mod tests {
         // Other fields should be defaults
         assert_eq!(config.font_size, 14);
         assert_eq!(config.tab_width, 4);
-        assert!(!config.line_wrap);
+        assert_eq!(config.line_wrap_column, 100);
     }
 
     #[test]

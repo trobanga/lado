@@ -150,7 +150,7 @@ impl App {
             ui_theme: config.ui_theme.clone().into(),
             font_size: config.font_size,
             tab_width: config.tab_width,
-            line_wrap: config.line_wrap,
+            line_wrap_column: config.line_wrap_column,
             key_unified: config.key_unified.clone().into(),
             key_side_by_side: config.key_side_by_side.clone().into(),
             key_scroll_down: config.key_scroll_down.clone().into(),
@@ -223,7 +223,8 @@ impl App {
             if let Some(ref data) = *data_borrow {
                 let comments = pr_comments.borrow();
                 let hl = highlighter.borrow();
-                let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl);
+                let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
+                let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl, wrap);
                 window.set_lines(lines);
             }
 
@@ -406,11 +407,13 @@ impl App {
                         window.set_selected_file(initial.path.clone().into());
                         window.set_selected_file_viewed(initial_viewed);
                         let hl = highlighter.borrow();
+                        let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
                         let lines = get_lines_for_file(
                             &diff_data,
                             &initial.path,
                             grouped_comments.as_ref(),
                             &hl,
+                            wrap,
                         );
                         window.set_lines(lines);
                     }
@@ -430,7 +433,7 @@ impl App {
                 ui_theme: settings.ui_theme.to_string(),
                 font_size: settings.font_size,
                 tab_width: settings.tab_width,
-                line_wrap: settings.line_wrap,
+                line_wrap_column: settings.line_wrap_column,
                 panel_width: window.get_left_panel_width(),
                 key_unified: settings.key_unified.to_string(),
                 key_side_by_side: settings.key_side_by_side.to_string(),
@@ -453,7 +456,8 @@ impl App {
                 if let Some(ref data) = *diff_data.borrow() {
                     let comments = pr_comments.borrow();
                     let hl = highlighter.borrow();
-                    let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl);
+                    let wrap = settings.line_wrap_column.max(0) as usize;
+                    let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl, wrap);
                     window.set_lines(lines);
                 }
             }
@@ -855,7 +859,9 @@ impl App {
                 self.window.set_selected_file_viewed(viewed);
                 let comments = self.pr_comments.borrow();
                 let hl = self.highlighter.borrow();
-                let lines = get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl);
+                let wrap = self.window.get_app_settings().line_wrap_column.max(0) as usize;
+                let lines =
+                    get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl, wrap);
                 self.window.set_lines(lines);
             }
         }
@@ -887,9 +893,10 @@ fn get_lines_for_file(
     path: &str,
     comments: Option<&FileComments>,
     highlighter: &Highlighter,
+    wrap_column: usize,
 ) -> ModelRc<DiffLine> {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
-    use crate::models::parse_hex_color;
+    use crate::models::{parse_hex_color, wrap_diff_line};
 
     let hunks = data.file_hunks.get(path).cloned().unwrap_or_default();
 
@@ -961,7 +968,10 @@ fn get_lines_for_file(
             }
         }
 
-        result.push(model.into());
+        // Wrap long lines into multiple visual rows (no-op when wrap_column == 0)
+        for wrapped in wrap_diff_line(model, wrap_column) {
+            result.push(wrapped.into());
+        }
 
         // Check if there are comments for this line
         if let Some(comments) = file_comments {

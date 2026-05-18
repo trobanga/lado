@@ -114,7 +114,8 @@ component UnifiedLine inherits Rectangle {
             width: 24px;
 
             Text {
-                text: line.line-type == "add" ? "+" :
+                text: line.is-continuation ? " " :
+                      line.line-type == "add" ? "+" :
                       line.line-type == "remove" ? "-" : " ";
                 color: line.line-type == "add" ? theme.diff-add-text :
                        line.line-type == "remove" ? theme.diff-remove-text :
