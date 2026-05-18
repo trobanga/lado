@@ -87,7 +87,7 @@ export component HelpOverlay inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         width: min(480px, parent.width - 80px);
-        height: min(520px, parent.height - 80px);
+        height: min(720px, parent.height - 80px);
         background: theme.bg-secondary;
         border-radius: 8px;
         border-width: 1px;
@@ -145,7 +145,7 @@ export component HelpOverlay inherits Rectangle {
 
             // Scrollable content
             Flickable {
-                viewport-height: 480px;
+                viewport-height: 640px;
 
                 VerticalLayout {
                     spacing: 0px;
