@@ -202,9 +202,22 @@ export component MainWindow inherits Window {
                 return accept;
             }
 
-            // v - toggle viewed on focused file
+            // v - toggle viewed on focused file. When marking as viewed
+            // (not unmarking), auto-advance to the next file like 'J'.
             if (event.text == "v") {
-                root.toggle-viewed(root.focused-index);
+                if (root.focused-index >= 0
+                    && root.focused-index < root.files.length
+                    && !root.files[root.focused-index].is-folder
+                    && !root.files[root.focused-index].viewed) {
+                    root.toggle-viewed(root.focused-index);
+                    root.focused-index = root.find-next-file(root.focused-index, 1);
+                    if (root.focused-index >= 0 && root.focused-index < root.files.length) {
+                        root.selected-file = root.files[root.focused-index].path;
+                        root.file-selected(root.selected-file);
+                    }
+                } else {
+                    root.toggle-viewed(root.focused-index);
+                }
                 return accept;
             }
 
