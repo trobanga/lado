@@ -9,6 +9,10 @@ pub struct PrInfo {
     pub base_ref: String,
     pub head_ref: String,
     pub title: String,
+    /// SHA of base branch tip recorded by GitHub (PR's view of base).
+    pub base_oid: String,
+    /// SHA of PR head recorded by GitHub.
+    pub head_oid: String,
 }
 
 /// Which side of the diff a comment is on
@@ -55,7 +59,7 @@ pub fn get_pr_info(pr_number: u32) -> Result<PrInfo> {
             "view",
             &pr_number.to_string(),
             "--json",
-            "baseRefName,headRefName,title",
+            "baseRefName,headRefName,title,baseRefOid,headRefOid",
         ])
         .output()
         .context("Failed to execute gh CLI. Is it installed?")?;
@@ -83,10 +87,22 @@ pub fn get_pr_info(pr_number: u32) -> Result<PrInfo> {
         .ok_or_else(|| anyhow!("Missing title"))?
         .to_string();
 
+    let base_oid = json["baseRefOid"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing baseRefOid"))?
+        .to_string();
+
+    let head_oid = json["headRefOid"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing headRefOid"))?
+        .to_string();
+
     Ok(PrInfo {
         base_ref,
         head_ref,
         title,
+        base_oid,
+        head_oid,
     })
 }
 

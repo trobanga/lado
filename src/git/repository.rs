@@ -4,6 +4,7 @@ use git2::{DiffOptions, Oid, Repository as Git2Repo};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::Command;
 
 pub struct Repository {
     repo: Git2Repo,
@@ -88,6 +89,39 @@ impl Repository {
     pub fn head_commit(&self) -> Result<Oid> {
         let head = self.repo.head().context("Failed to get HEAD")?;
         head.target().ok_or_else(|| anyhow!("HEAD has no target"))
+    }
+
+    /// Fetch a specific ref from a remote via `git fetch`.
+    /// Uses the git CLI to inherit user's credential helpers and SSH config.
+    pub fn fetch_remote_ref(&self, remote: &str, ref_name: &str) -> Result<()> {
+        let workdir = self
+            .repo
+            .workdir()
+            .ok_or_else(|| anyhow!("Repository has no working directory"))?;
+
+        let output = Command::new("git")
+            .current_dir(workdir)
+            .args(["fetch", remote, ref_name])
+            .output()
+            .context("Failed to execute git fetch")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git fetch {} {} failed: {}", remote, ref_name, stderr));
+        }
+        Ok(())
+    }
+
+    /// Count commits reachable from `to` but not from `from` (i.e. how far `to` is ahead of `from`).
+    pub fn count_commits_ahead(&self, from: Oid, to: Oid) -> Result<usize> {
+        if from == to {
+            return Ok(0);
+        }
+        let mut walk = self.repo.revwalk().context("Failed to create revwalk")?;
+        walk.push(to).context("Failed to push 'to' onto revwalk")?;
+        walk.hide(from)
+            .context("Failed to hide 'from' on revwalk")?;
+        Ok(walk.count())
     }
 
     /// Compute diff between two commits

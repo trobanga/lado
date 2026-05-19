@@ -35,6 +35,21 @@ pub struct App {
     target_key: String,
 }
 
+/// Format the "behind base" indicator appended to the PR diff title.
+/// Returns an empty string when there is nothing to warn about.
+fn format_stale_base_note(base_ref: &str, commits_behind: usize) -> String {
+    if commits_behind == 0 {
+        String::new()
+    } else {
+        format!(
+            " ⚠ behind {} by {} commit{}",
+            base_ref,
+            commits_behind,
+            if commits_behind == 1 { "" } else { "s" }
+        )
+    }
+}
+
 /// Count comments that actually match a diff line for a given file.
 /// Only counts comments whose line number matches a line in the diff,
 /// so stale/resolved comments pointing at lines no longer in the diff are excluded.
@@ -777,12 +792,37 @@ impl App {
             }
             DiffTarget::PullRequest(pr_num) => {
                 let pr_info = github::get_pr_refs(*pr_num)?;
-                let base = self.repo.resolve_ref(&pr_info.base_ref)?;
+
+                // Fetch latest base from origin so diff reflects current remote state,
+                // not whatever the local checkout happens to be at.
+                if let Err(e) = self.repo.fetch_remote_ref("origin", &pr_info.base_ref) {
+                    eprintln!(
+                        "Warning: could not fetch origin/{}: {}",
+                        pr_info.base_ref, e
+                    );
+                }
+
+                let origin_base_ref = format!("origin/{}", pr_info.base_ref);
+                let base = self
+                    .repo
+                    .resolve_ref(&origin_base_ref)
+                    .or_else(|_| self.repo.resolve_ref(&pr_info.base_ref))?;
                 let head = self.repo.resolve_ref(&pr_info.head_ref)?;
 
-                // Update toolbar with PR title
-                self.window
-                    .set_diff_title(format!("PR #{}: {}", pr_num, pr_info.title).into());
+                // Detect stale: PR's recorded base SHA vs the fresh origin/<base> tip.
+                let stale_note = match git2::Oid::from_str(&pr_info.base_oid) {
+                    Ok(pr_base_oid) if pr_base_oid != base => self
+                        .repo
+                        .count_commits_ahead(pr_base_oid, base)
+                        .map(|n| format_stale_base_note(&pr_info.base_ref, n))
+                        .unwrap_or_else(|_| format!(" ⚠ behind {}", pr_info.base_ref)),
+                    _ => String::new(),
+                };
+
+                // Update toolbar with PR title (plus stale warning if any)
+                self.window.set_diff_title(
+                    format!("PR #{}: {}{}", pr_num, pr_info.title, stale_note).into(),
+                );
 
                 // Store refs for later commit navigation
                 *self.pr_base_ref.borrow_mut() = Some(pr_info.base_ref);
@@ -1026,5 +1066,31 @@ fn format_timestamp(timestamp: &str) -> String {
         format!("{} {}", date, time)
     } else {
         timestamp.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_stale_base_note;
+
+    #[test]
+    fn stale_note_empty_when_up_to_date() {
+        assert_eq!(format_stale_base_note("main", 0), "");
+    }
+
+    #[test]
+    fn stale_note_singular() {
+        assert_eq!(
+            format_stale_base_note("main", 1),
+            " ⚠ behind main by 1 commit"
+        );
+    }
+
+    #[test]
+    fn stale_note_plural() {
+        assert_eq!(
+            format_stale_base_note("develop", 76),
+            " ⚠ behind develop by 76 commits"
+        );
     }
 }
