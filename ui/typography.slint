@@ -1,0 +1,25 @@
+// Type scale tokens for the application chrome (toolbar, panels, tree).
+//
+// One family (IBM Plex Sans, the window default) carries everything; hierarchy
+// comes from size + weight + letter-spacing, not from a second face. Code keeps
+// its own monospace + user-configurable size and is intentionally not modelled
+// here. Keeping the scale small and named makes the chrome consistent and easy
+// to retune in one place.
+export global Typography {
+    // Sizes
+    out property <length> wordmark: 15px;   // "lado" brand mark
+    out property <length> title: 13px;      // PR / diff title
+    out property <length> section: 11px;    // panel section headers (uppercased)
+    out property <length> body: 13px;       // file names, primary rows
+    out property <length> label: 12px;      // controls: toggle, refresh, viewed
+    out property <length> caption: 11px;    // counts, timestamps, secondary meta
+
+    // Weights
+    out property <int> regular: 400;
+    out property <int> medium: 500;
+    out property <int> semibold: 600;
+
+    // Tracking for the uppercased section headers — small positive tracking is
+    // what makes all-caps labels read as deliberate rather than shouty.
+    out property <length> section-tracking: 0.6px;
+}

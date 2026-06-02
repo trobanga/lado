@@ -1,6 +1,7 @@
 import { ThemeColors } from "../theme.slint";
 import { PrCommitEntry } from "../structs.slint";
 import { Icon } from "icon.slint";
+import { Typography } from "../typography.slint";
 
 export component CommitList inherits Rectangle {
     in property <ThemeColors> theme;
@@ -40,10 +41,11 @@ export component CommitList inherits Rectangle {
                     }
 
                     Text {
-                        text: "Commits";
+                        text: "COMMITS";
                         color: theme.text-secondary;
-                        font-size: 12px;
-                        font-weight: 600;
+                        font-size: Typography.section;
+                        font-weight: Typography.semibold;
+                        letter-spacing: Typography.section-tracking;
                         vertical-alignment: center;
                     }
 

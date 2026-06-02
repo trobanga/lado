@@ -1,4 +1,5 @@
 import { ThemeColors } from "../theme.slint";
+import { Typography } from "../typography.slint";
 
 component ToolbarButton inherits Rectangle {
     in property <ThemeColors> theme;
@@ -21,7 +22,7 @@ component ToolbarButton inherits Rectangle {
         Text {
             text: label;
             color: active ? theme.text-primary : theme.text-secondary;
-            font-size: 12px;
+            font-size: Typography.label;
             vertical-alignment: center;
         }
     }
@@ -52,7 +53,7 @@ component ViewToggle inherits Rectangle {
             Text {
                 text: "Unified";
                 color: !side-by-side ? theme.text-primary : theme.text-muted;
-                font-size: 11px;
+                font-size: Typography.caption;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -72,7 +73,7 @@ component ViewToggle inherits Rectangle {
             Text {
                 text: "Side by Side";
                 color: side-by-side ? theme.text-primary : theme.text-muted;
-                font-size: 11px;
+                font-size: Typography.caption;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -119,8 +120,9 @@ export component Toolbar inherits Rectangle {
             Text {
                 text: "lado";
                 color: theme.accent-primary;
-                font-size: 15px;
-                font-weight: 600;
+                font-size: Typography.wordmark;
+                font-weight: Typography.semibold;
+                letter-spacing: 0.3px;
                 vertical-alignment: center;
             }
 
@@ -133,7 +135,7 @@ export component Toolbar inherits Rectangle {
             Text {
                 text: diff-title;
                 color: theme.text-secondary;
-                font-size: 13px;
+                font-size: Typography.title;
                 vertical-alignment: center;
             }
         }

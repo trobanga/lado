@@ -1,6 +1,7 @@
 import { ThemeColors } from "../theme.slint";
 import { FileEntry } from "../structs.slint";
 import { Icon } from "icon.slint";
+import { Typography } from "../typography.slint";
 
 // File status indicator
 component StatusBadge inherits Rectangle {
@@ -153,7 +154,7 @@ component TreeItem inherits Rectangle {
             text: name;
             color: viewed ? theme.text-muted :
                    selected ? theme.text-primary : theme.text-secondary;
-            font-size: 13px;
+            font-size: Typography.body;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -199,10 +200,11 @@ export component FileTree inherits Rectangle {
                 alignment: start;
 
                 Text {
-                    text: "Changed Files";
-                    color: theme.text-primary;
-                    font-size: 13px;
-                    font-weight: 500;
+                    text: "CHANGED FILES";
+                    color: theme.text-secondary;
+                    font-size: Typography.section;
+                    font-weight: Typography.semibold;
+                    letter-spacing: Typography.section-tracking;
                     vertical-alignment: center;
                 }
             }
