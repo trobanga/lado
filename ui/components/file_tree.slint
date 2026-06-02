@@ -57,19 +57,21 @@ component TreeItem inherits Rectangle {
     callback toggle-viewed;
 
     height: 28px;
+    // Single coherent treatment: a subtle fill for any active row and one left
+    // accent bar that doubles as the position indicator — no full border.
     background: selected ? theme.bg-selected :
-                focused ? theme.bg-hover :
-                (touch.has-hover ? theme.bg-hover : transparent);
-    border-width: focused && !selected ? 1px : 0;
-    border-color: theme.accent-primary;
+                (focused || touch.has-hover) ? theme.bg-hover :
+                transparent;
 
-    // Selection indicator bar on left edge
+    // Left edge bar: solid+thick when selected, thin+translucent for keyboard
+    // focus, absent otherwise. Distinguishes the two states without a border.
     Rectangle {
         x: 0;
         y: 0;
-        width: selected ? 3px : 0;
+        width: selected ? 3px : (focused ? 2px : 0);
         height: parent.height;
         background: theme.accent-primary;
+        opacity: selected ? 1.0 : (focused ? 0.55 : 0.0);
     }
 
     // Row-level click handler — declared before the HorizontalLayout so that
