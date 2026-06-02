@@ -36,6 +36,10 @@ export component MainWindow inherits Window {
     in-out property <int> selected-commit-index: -1;
     in-out property <bool> settings-visible: false;
     in-out property <bool> help-visible: false;
+    // Selectable plain-text mode (toggled with 'y'). selectable-text is the
+    // git-diff-style rendering of the current file, built in Rust.
+    in-out property <bool> select-mode: false;
+    in-out property <string> selectable-text: "";
     in-out property <length> left-panel-width: 280px;
     in-out property <AppSettings> app-settings: {
         ui-theme: "dark",
@@ -102,16 +106,32 @@ export component MainWindow inherits Window {
                 root.help-visible = !root.help-visible;
                 return accept;
             }
-            // Escape closes help overlay
+            // Escape closes help overlay, then leaves select mode
             if (event.text == Key.Escape) {
                 if (root.help-visible) {
                     root.help-visible = false;
+                    return accept;
+                }
+                if (root.select-mode) {
+                    root.select-mode = false;
+                    main-focus.focus();
                     return accept;
                 }
             }
 
             // Skip keyboard navigation when settings panel or help overlay is open
             if (root.settings-visible || root.help-visible) {
+                return reject;
+            }
+
+            // Enter selectable plain-text mode. Once entered, the user clicks
+            // into the read-only TextInput to drag-select; Escape / the Exit
+            // button leaves. Diff-navigation keys are ignored while in the mode.
+            if (event.text == "y") {
+                root.select-mode = true;
+                return accept;
+            }
+            if (root.select-mode) {
                 return reject;
             }
 
@@ -305,8 +325,14 @@ export component MainWindow inherits Window {
                     font-size: root.app-settings.font-size * 1px;
                     scroll-step: root.scroll-step;
                     viewed: root.selected-file-viewed;
+                    select-mode: root.select-mode;
+                    selectable-text: root.selectable-text;
                     toggle-viewed => {
                         root.toggle-selected-viewed();
+                    }
+                    exit-select => {
+                        root.select-mode = false;
+                        main-focus.focus();
                     }
                 }
 

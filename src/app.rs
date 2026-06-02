@@ -241,6 +241,7 @@ impl App {
                 let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
                 let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl, wrap);
                 window.set_lines(lines);
+                window.set_selectable_text(data.selectable_text(&path_str).as_str().into());
             }
 
             let viewed = is_path_viewed(
@@ -431,6 +432,9 @@ impl App {
                             wrap,
                         );
                         window.set_lines(lines);
+                        window.set_selectable_text(
+                            diff_data.selectable_text(&initial.path).as_str().into(),
+                        );
                     }
                 }
             }
@@ -474,6 +478,7 @@ impl App {
                     let wrap = settings.line_wrap_column.max(0) as usize;
                     let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl, wrap);
                     window.set_lines(lines);
+                    window.set_selectable_text(data.selectable_text(&selected_file).as_str().into());
                 }
             }
         });
@@ -903,6 +908,8 @@ impl App {
                 let lines =
                     get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl, wrap);
                 self.window.set_lines(lines);
+                self.window
+                    .set_selectable_text(diff_data.selectable_text(&initial.path).as_str().into());
             }
         }
 

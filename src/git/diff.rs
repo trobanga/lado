@@ -94,6 +94,38 @@ impl DiffData {
             }
         }
     }
+
+    /// Render one file's hunks as git-diff-style plaintext for the
+    /// selectable-text view. Each code line is prefixed with its diff sign
+    /// (`+`/`-`/space) and hunk headers are emitted verbatim, so the copied
+    /// text mirrors what the diff view shows. Comments live outside `hunk.lines`
+    /// (they're injected into the UI model later), so nothing extra is filtered.
+    /// Returns an empty string when the file has no hunks.
+    pub fn selectable_text(&self, path: &str) -> String {
+        let Some(hunks) = self.file_hunks.get(path) else {
+            return String::new();
+        };
+
+        let mut out: Vec<String> = Vec::new();
+        for hunk in hunks {
+            let header = hunk.header.trim_end();
+            if !header.is_empty() {
+                out.push(header.to_string());
+            }
+            for line in &hunk.lines {
+                let sign = match line.line_type {
+                    DiffLineType::Add => "+",
+                    DiffLineType::Remove => "-",
+                    DiffLineType::Context => " ",
+                    // Hunk/Comment never appear inside hunk.lines; keep the match
+                    // exhaustive without emitting a stray prefix.
+                    DiffLineType::Hunk | DiffLineType::Comment => "",
+                };
+                out.push(format!("{sign}{}", line.content));
+            }
+        }
+        out.join("\n")
+    }
 }
 
 #[cfg(test)]
@@ -173,5 +205,60 @@ mod tests {
         data.expand_tabs(2);
 
         assert_eq!(data.file_hunks["test.py"][0].lines[0].content, "  indented");
+    }
+
+    #[test]
+    fn test_selectable_text_git_diff_style() {
+        let data = DiffData {
+            files: vec![],
+            file_hunks: HashMap::from([(
+                "test.rs".to_string(),
+                vec![DiffHunk {
+                    header: "@@ -1,3 +1,3 @@ fn main()\n".to_string(),
+                    old_start: 1,
+                    old_lines: 3,
+                    new_start: 1,
+                    new_lines: 3,
+                    lines: vec![
+                        DiffLine {
+                            line_type: DiffLineType::Context,
+                            old_line_num: Some(1),
+                            new_line_num: Some(1),
+                            content: "let x = 1;".to_string(),
+                            comment: None,
+                        },
+                        DiffLine {
+                            line_type: DiffLineType::Remove,
+                            old_line_num: Some(2),
+                            new_line_num: None,
+                            content: "foo();".to_string(),
+                            comment: None,
+                        },
+                        DiffLine {
+                            line_type: DiffLineType::Add,
+                            old_line_num: None,
+                            new_line_num: Some(2),
+                            content: "bar();".to_string(),
+                            comment: None,
+                        },
+                    ],
+                }],
+            )]),
+        };
+
+        // Hunk header verbatim, then one line per code line with its diff sign.
+        assert_eq!(
+            data.selectable_text("test.rs"),
+            "@@ -1,3 +1,3 @@ fn main()\n let x = 1;\n-foo();\n+bar();"
+        );
+    }
+
+    #[test]
+    fn test_selectable_text_missing_file_is_empty() {
+        let data = DiffData {
+            files: vec![],
+            file_hunks: HashMap::new(),
+        };
+        assert_eq!(data.selectable_text("nope.rs"), "");
     }
 }

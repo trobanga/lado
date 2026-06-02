@@ -1,3 +1,4 @@
+import { ScrollView } from "std-widgets.slint";
 import { ThemeColors } from "../theme.slint";
 import { DiffLine } from "../structs.slint";
 import { UnifiedView } from "unified.slint";
@@ -12,8 +13,16 @@ export component DiffView inherits Rectangle {
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
     in property <bool> viewed: false;
+    // Selectable plain-text mode: swaps the rendered diff for a read-only,
+    // monospace TextInput so text can be dragged-to-select and copied (Ctrl+C).
+    // Native Slint Text isn't selectable; TextInput is.
+    in property <bool> select-mode: false;
+    in property <string> selectable-text: "";
 
     callback toggle-viewed();
+    // Asks the parent to leave select mode (it owns the select-mode property
+    // and the keyboard focus that must return to the main view).
+    callback exit-select();
 
     background: theme.bg-primary;
 
@@ -109,7 +118,7 @@ export component DiffView inherits Rectangle {
             }
         }
 
-        if !root.side-by-side: UnifiedView {
+        if !root.select-mode && !root.side-by-side: UnifiedView {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
@@ -118,13 +127,102 @@ export component DiffView inherits Rectangle {
             scroll-step: root.scroll-step;
         }
 
-        if root.side-by-side: SideBySideView {
+        if !root.select-mode && root.side-by-side: SideBySideView {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
             font-size: root.font-size;
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;
+        }
+
+        // Selectable plain-text mode
+        if root.select-mode: VerticalLayout {
+            vertical-stretch: 1;
+
+            // Banner: hint + exit affordance
+            Rectangle {
+                height: root.font-size * 1.7;
+                background: theme.diff-hunk-bg;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "Select mode · drag to select · Ctrl+C to copy";
+                        color: theme.text-muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: exit-label.preferred-width + 16px;
+                        y: (parent.height - self.height) / 2;
+                        height: root.font-size * 1.4;
+                        border-radius: 3px;
+                        border-width: 1px;
+                        border-color: exit-touch.has-hover ? theme.accent-primary : theme.border-normal;
+                        background: exit-touch.has-hover ? theme.accent-primary.with-alpha(0.15) : transparent;
+
+                        exit-label := Text {
+                            text: "Exit (Esc)";
+                            color: theme.text-primary;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        exit-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.exit-select(); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: theme.border-subtle;
+                }
+            }
+
+            // Read-only monospace TextInput inside a ScrollView. Mirrors the
+            // composition Slint's own TextEdit uses (ScrollView + TextInput with
+            // page-height), so drag-to-select and scroll don't fight each other.
+            sel-scroll := ScrollView {
+                vertical-stretch: 1;
+                viewport-width: max(self.visible-width, sel-input.preferred-width + 16px);
+                viewport-height: max(self.visible-height, sel-input.preferred-height + 8px);
+
+                sel-input := TextInput {
+                    x: 8px;
+                    y: 4px;
+                    text: root.selectable-text;
+                    read-only: true;
+                    single-line: false;
+                    wrap: no-wrap;
+                    font-family: "monospace";
+                    font-size: root.font-size;
+                    color: theme.text-primary;
+                    selection-background-color: theme.accent-primary;
+                    selection-foreground-color: theme.bg-primary;
+                    page-height: sel-scroll.visible-height;
+
+                    // Escape leaves select mode even while the TextInput holds
+                    // focus (it would otherwise swallow the key). Other keys fall
+                    // through so copy/selection/navigation keep working.
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.exit-select();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
         }
     }
 }
