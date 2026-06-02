@@ -322,6 +322,11 @@ export component MainWindow inherits Window {
                     y: 0;
                     width: parent.width - root.left-panel-width;
                     height: parent.height;
+                    // Subtle elevation: a soft shadow cast left onto the sidebar
+                    // so the diff reads as the main surface above the file tree.
+                    drop-shadow-color: #00000026;
+                    drop-shadow-blur: 8px;
+                    drop-shadow-offset-x: -2px;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;
