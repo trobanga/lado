@@ -329,11 +329,6 @@ export component MainWindow inherits Window {
                     y: 0;
                     width: parent.width - root.left-panel-width;
                     height: parent.height;
-                    // Subtle elevation: a soft shadow cast left onto the sidebar
-                    // so the diff reads as the main surface above the file tree.
-                    drop-shadow-color: #00000026;
-                    drop-shadow-blur: 8px;
-                    drop-shadow-offset-x: -2px;
                     theme: root.theme;
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;
@@ -352,6 +347,18 @@ export component MainWindow inherits Window {
                         root.select-mode = false;
                         main-focus.focus();
                     }
+                }
+
+                // Subtle elevation: a soft shadow on the sidebar's right edge so
+                // the diff reads as the main surface above the tree. Drawn as an
+                // explicit gradient because drop-shadow on a filled component is
+                // a no-op in this renderer.
+                Rectangle {
+                    x: root.left-panel-width - 10px;
+                    y: 0;
+                    width: 10px;
+                    height: parent.height;
+                    background: @linear-gradient(90deg, transparent 0%, #00000033 100%);
                 }
 
                 // Draggable splitter (last child = on top for hit-testing)
