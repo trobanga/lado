@@ -1,0 +1,76 @@
+// Vector icon set drawn with native Slint Path geometry.
+//
+// Why Path and not SVG @image-url or a glyph font:
+//  - Zero asset pipeline and no dependency on the `svg` cargo feature, so it
+//    always compiles.
+//  - `fill`/`stroke` bind straight to theme colors, so icons recolor across all
+//    themes (dark/light/solarized) with no `colorize` indirection.
+//  - Crisp at any DPI; a diff viewer needs a small, sharp set, not a library.
+//
+// All paths are authored in a 16x16 viewbox and scale to `size`.
+
+export component Icon inherits Rectangle {
+    // "folder", "folder-open", "file", "chevron-right", "chevron-down"
+    in property <string> kind;
+    in property <color> icon-color: #888888;
+    in property <length> size: 16px;
+
+    width: size;
+    height: size;
+
+    // Closed folder: taller body (≈4:3) with a raised left tab so it doesn't
+    // read as squat. Spans y 4..14 to fill the box vertically.
+    if kind == "folder": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: root.icon-color;
+        commands: "M 2.5 4 L 6.5 4 L 8 5.5 L 13.5 5.5 L 13.5 14 L 2.5 14 Z";
+    }
+
+    // Open folder: same proportions, front face leans (parallelogram) to read
+    // as "open" without changing footprint height.
+    if kind == "folder-open": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: root.icon-color;
+        commands: "M 2.5 4.5 L 6.5 4.5 L 8 6 L 13.5 6 L 12.25 14 L 1.25 14 Z";
+    }
+
+    // Document with a folded top-right corner (the diagonal cut).
+    if kind == "file": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: root.icon-color;
+        commands: "M 3.5 1.5 L 9.5 1.5 L 12.5 4.5 L 12.5 14.5 L 3.5 14.5 Z";
+    }
+
+    // Collapsed disclosure chevron (points right).
+    if kind == "chevron-right": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: transparent;
+        stroke: root.icon-color;
+        stroke-width: 1.5px;
+        commands: "M 6.5 4 L 10.5 8 L 6.5 12";
+    }
+
+    // Expanded disclosure chevron (points down).
+    if kind == "chevron-down": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        fill: transparent;
+        stroke: root.icon-color;
+        stroke-width: 1.5px;
+        commands: "M 4 6.5 L 8 10.5 L 12 6.5";
+    }
+}

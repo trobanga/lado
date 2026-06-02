@@ -1,5 +1,6 @@
 import { ThemeColors } from "../theme.slint";
 import { PrCommitEntry } from "../structs.slint";
+import { Icon } from "icon.slint";
 
 export component CommitList inherits Rectangle {
     in property <ThemeColors> theme;
@@ -30,12 +31,12 @@ export component CommitList inherits Rectangle {
                     spacing: 8px;
                     alignment: start;
 
-                    // Collapse arrow
-                    Text {
-                        text: expanded ? "▼" : "▶";
-                        color: theme.text-muted;
-                        font-size: 10px;
-                        vertical-alignment: center;
+                    // Collapse chevron
+                    Icon {
+                        y: (parent.height - self.height) / 2;
+                        kind: expanded ? "chevron-down" : "chevron-right";
+                        icon-color: theme.text-muted;
+                        size: 12px;
                     }
 
                     Text {

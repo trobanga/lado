@@ -1,5 +1,6 @@
 import { ThemeColors } from "../theme.slint";
 import { FileEntry } from "../structs.slint";
+import { Icon } from "icon.slint";
 
 // File status indicator
 component StatusBadge inherits Rectangle {
@@ -90,18 +91,16 @@ component TreeItem inherits Rectangle {
         spacing: 8px;
         alignment: start;
 
-        // Expand/collapse indicator for folders
+        // Expand/collapse chevron for folders
         if is-folder: Rectangle {
             width: 16px;
             height: 16px;
             y: (parent.height - self.height) / 2;
 
-            Text {
-                text: is-expanded ? "v" : ">";
-                color: theme.text-muted;
-                font-size: 10px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            Icon {
+                kind: is-expanded ? "chevron-down" : "chevron-right";
+                icon-color: theme.text-muted;
+                size: 14px;
             }
 
             TouchArea {
@@ -110,14 +109,19 @@ component TreeItem inherits Rectangle {
             }
         }
 
-        // File/folder icon placeholder
-        Rectangle {
+        // Files have no chevron — reserve its slot so file icons stay aligned
+        // under folder icons (chevron width 16px + layout spacing 8px).
+        if !is-folder: Rectangle {
             width: 16px;
             height: 16px;
+        }
+
+        // File / folder type icon
+        Icon {
             y: (parent.height - self.height) / 2;
-            background: is-folder ? theme.accent-secondary : transparent;
-            border-radius: 2px;
-            opacity: 0.3;
+            size: 16px;
+            kind: is-folder ? (is-expanded ? "folder-open" : "folder") : "file";
+            icon-color: is-folder ? theme.accent-secondary : theme.text-muted;
         }
 
         // Viewed checkbox for files
