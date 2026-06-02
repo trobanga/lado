@@ -30,6 +30,10 @@ export component MainWindow inherits Window {
     in-out property <bool> side-by-side-mode: false;
     in-out property <string> selected-file: "";
     in-out property <string> diff-title: "No diff loaded";
+    // Overall diff summary shown in the toolbar.
+    in-out property <int> files-changed: 0;
+    in-out property <int> total-additions: 0;
+    in-out property <int> total-deletions: 0;
     in-out property <[FileEntry]> files: [];
     in-out property <[DiffLine]> lines: [];
     in-out property <[PrCommitEntry]> commits: [];
@@ -254,6 +258,9 @@ export component MainWindow inherits Window {
                 theme: root.theme;
                 side-by-side: root.side-by-side-mode;
                 diff-title: root.diff-title;
+                files-changed: root.files-changed;
+                total-additions: root.total-additions;
+                total-deletions: root.total-deletions;
                 toggle-view => {
                     root.side-by-side-mode = !root.side-by-side-mode;
                     root.toggle-view-mode();

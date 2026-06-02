@@ -403,6 +403,7 @@ impl App {
                 // Use empty expanded state for commit-specific views (fresh view each time)
                 let tree = build_file_tree(&diff_data.files);
                 let flat_entries = flatten_tree_with_state(&tree, 0, &HashMap::new());
+                set_diff_summary(&window, &diff_data);
 
                 let file_entries =
                     build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data), None);
@@ -880,6 +881,7 @@ impl App {
 
         // Build hierarchical file tree and flatten for UI
         let tree = build_file_tree(&diff_data.files);
+        set_diff_summary(&self.window, &diff_data);
         let expanded_state = self.expanded_state.borrow();
         let flat_entries = flatten_tree_with_state(&tree, 0, &expanded_state);
         drop(expanded_state);
@@ -945,6 +947,17 @@ impl App {
 }
 
 /// Convert hunks for a file into Slint-compatible DiffLine model, interleaving comments
+/// Set the toolbar's overall diff summary (files changed + total added/removed)
+/// from the complete file list, so it stays stable regardless of which folders
+/// are expanded in the tree.
+fn set_diff_summary(window: &MainWindow, data: &DiffData) {
+    let additions: usize = data.files.iter().map(|f| f.additions).sum();
+    let deletions: usize = data.files.iter().map(|f| f.deletions).sum();
+    window.set_files_changed(data.files.len() as i32);
+    window.set_total_additions(additions as i32);
+    window.set_total_deletions(deletions as i32);
+}
+
 fn get_lines_for_file(
     data: &DiffData,
     path: &str,

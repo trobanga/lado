@@ -92,6 +92,9 @@ export component Toolbar inherits Rectangle {
     in property <ThemeColors> theme;
     in property <bool> side-by-side;
     in property <string> diff-title;
+    in property <int> files-changed: 0;
+    in property <int> total-additions: 0;
+    in property <int> total-deletions: 0;
 
     callback toggle-view;
     callback refresh;
@@ -134,8 +137,9 @@ export component Toolbar inherits Rectangle {
 
             Text {
                 text: diff-title;
-                color: theme.text-secondary;
+                color: theme.text-primary;
                 font-size: Typography.title;
+                font-weight: Typography.medium;
                 vertical-alignment: center;
             }
         }
@@ -144,6 +148,39 @@ export component Toolbar inherits Rectangle {
         HorizontalLayout {
             spacing: 12px;
             alignment: end;
+
+            // Overall diff summary: files changed + total +/-
+            if files-changed > 0: HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+
+                Text {
+                    text: files-changed + (files-changed == 1 ? " file" : " files");
+                    color: theme.text-muted;
+                    font-size: Typography.caption;
+                    vertical-alignment: center;
+                }
+
+                if total-additions > 0: Text {
+                    text: "+" + total-additions;
+                    color: theme.status-added;
+                    font-size: Typography.caption;
+                    vertical-alignment: center;
+                }
+
+                if total-deletions > 0: Text {
+                    text: "-" + total-deletions;
+                    color: theme.status-deleted;
+                    font-size: Typography.caption;
+                    vertical-alignment: center;
+                }
+            }
+
+            if files-changed > 0: Rectangle {
+                width: 1px;
+                height: 20px;
+                background: theme.border-normal;
+            }
 
             ViewToggle {
                 theme: root.theme;
