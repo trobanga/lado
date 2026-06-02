@@ -12,6 +12,10 @@ pub struct FileTreeNode {
     pub is_folder: bool,
     pub children: Vec<FileTreeNode>,
     pub status: Option<String>,
+    /// Added/removed line counts. For files, the file's own counts; for folders,
+    /// the sum across all descendant files (filled in by `aggregate_stats`).
+    pub additions: usize,
+    pub deletions: usize,
 }
 
 /// Build a hierarchical file tree from a flat list of file changes
@@ -20,14 +24,42 @@ pub fn build_file_tree(files: &[FileChange]) -> Vec<FileTreeNode> {
 
     for file in files {
         let parts: Vec<&str> = file.path.split('/').collect();
-        insert_path(&mut root, &parts, &file.path, file.status.as_str(), "");
+        insert_path(
+            &mut root,
+            &parts,
+            &file.path,
+            file.status.as_str(),
+            "",
+            file.additions,
+            file.deletions,
+        );
     }
 
     // Convert HashMap to sorted Vec
     let mut nodes: Vec<FileTreeNode> = root.into_values().collect();
     compact_tree(&mut nodes);
     sort_tree(&mut nodes);
+    // Roll file counts up into their containing folders (post-compaction, so
+    // compacted "a/.../z" chains sum their real descendants).
+    aggregate_stats(&mut nodes);
     nodes
+}
+
+/// Post-order sum of added/removed counts into folder nodes. Returns the grand
+/// total across `nodes` so callers can derive an overall summary.
+fn aggregate_stats(nodes: &mut [FileTreeNode]) -> (usize, usize) {
+    let mut total_add = 0;
+    let mut total_del = 0;
+    for node in nodes.iter_mut() {
+        if node.is_folder {
+            let (a, d) = aggregate_stats(&mut node.children);
+            node.additions = a;
+            node.deletions = d;
+        }
+        total_add += node.additions;
+        total_del += node.deletions;
+    }
+    (total_add, total_del)
 }
 
 fn insert_path(
@@ -36,6 +68,8 @@ fn insert_path(
     full_path: &str,
     status: &str,
     prefix: &str,
+    additions: usize,
+    deletions: usize,
 ) {
     if parts.is_empty() {
         return;
@@ -61,11 +95,15 @@ fn insert_path(
         is_folder: !is_file,
         children: Vec::new(),
         status: None,
+        additions: 0,
+        deletions: 0,
     });
 
     if is_file {
         node.status = Some(status.to_string());
         node.path = full_path.to_string();
+        node.additions = additions;
+        node.deletions = deletions;
     } else {
         let mut child_map: HashMap<String, FileTreeNode> = node
             .children
@@ -73,7 +111,15 @@ fn insert_path(
             .map(|n| (n.name.clone(), n))
             .collect();
 
-        insert_path(&mut child_map, &parts[1..], full_path, status, &folder_path);
+        insert_path(
+            &mut child_map,
+            &parts[1..],
+            full_path,
+            status,
+            &folder_path,
+            additions,
+            deletions,
+        );
 
         node.children = child_map.into_values().collect();
     }
@@ -169,6 +215,8 @@ pub fn flatten_tree_with_state(
             status: node.status.clone().unwrap_or_else(|| "modified".to_string()),
             comment_count: 0,
             viewed: false,
+            additions: node.additions,
+            deletions: node.deletions,
         });
 
         // Only recurse into children if the folder is expanded
@@ -191,6 +239,8 @@ pub struct FlatFileEntry {
     pub status: String,
     pub comment_count: i32,
     pub viewed: bool,
+    pub additions: usize,
+    pub deletions: usize,
 }
 
 /// Collect all folder paths from a file tree (for bulk expand/collapse operations)
@@ -261,6 +311,54 @@ mod tests {
         assert!(tree[0].is_folder);
         assert_eq!(tree[0].name, "src");
         assert_eq!(tree[0].children.len(), 2);
+    }
+
+    #[test]
+    fn test_folder_stats_aggregate_descendants() {
+        let files = vec![
+            FileChange {
+                path: "src/a.rs".to_string(),
+                status: FileStatus::Modified,
+                additions: 10,
+                deletions: 5,
+            },
+            FileChange {
+                path: "src/sub/b.rs".to_string(),
+                status: FileStatus::Added,
+                additions: 20,
+                deletions: 0,
+            },
+            FileChange {
+                path: "README.md".to_string(),
+                status: FileStatus::Modified,
+                additions: 3,
+                deletions: 1,
+            },
+        ];
+
+        let tree = build_file_tree(&files);
+        let flat = flatten_tree_with_state(&tree, 0, &std::collections::HashMap::new());
+
+        // The src folder sums its descendants: a.rs (10/5) + sub/b.rs (20/0).
+        let src = flat
+            .iter()
+            .find(|e| e.path == "src" && e.is_folder)
+            .expect("src folder present");
+        assert_eq!((src.additions, src.deletions), (30, 5));
+
+        // The nested sub folder sums only b.rs.
+        let sub = flat
+            .iter()
+            .find(|e| e.path == "src/sub" && e.is_folder)
+            .expect("src/sub folder present");
+        assert_eq!((sub.additions, sub.deletions), (20, 0));
+
+        // File rows carry their own counts unchanged.
+        let a = flat
+            .iter()
+            .find(|e| e.path == "src/a.rs")
+            .expect("a.rs present");
+        assert_eq!((a.additions, a.deletions), (10, 5));
     }
 
     #[test]

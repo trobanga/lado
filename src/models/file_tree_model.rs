@@ -11,6 +11,8 @@ pub struct FileEntryModel {
     pub status: String,
     pub comment_count: i32,
     pub viewed: bool,
+    pub additions: i32,
+    pub deletions: i32,
 }
 
 impl From<&FlatFileEntry> for FileEntryModel {
@@ -24,6 +26,8 @@ impl From<&FlatFileEntry> for FileEntryModel {
             status: entry.status.clone(),
             comment_count: entry.comment_count,
             viewed: entry.viewed,
+            additions: entry.additions as i32,
+            deletions: entry.deletions as i32,
         }
     }
 }
@@ -39,6 +43,8 @@ impl From<FileEntryModel> for FileEntry {
             status: model.status.into(),
             comment_count: model.comment_count,
             viewed: model.viewed,
+            additions: model.additions,
+            deletions: model.deletions,
         }
     }
 }

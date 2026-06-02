@@ -16,6 +16,30 @@ component StatusBadge inherits Rectangle {
                 theme.status-modified;
 }
 
+// Added / removed line counts (files show their own, folders the descendant sum)
+component DiffStat inherits HorizontalLayout {
+    in property <ThemeColors> theme;
+    in property <int> additions;
+    in property <int> deletions;
+
+    spacing: 5px;
+    alignment: center;
+
+    if additions > 0: Text {
+        text: "+" + additions;
+        color: theme.status-added;
+        font-size: Typography.caption;
+        vertical-alignment: center;
+    }
+
+    if deletions > 0: Text {
+        text: "-" + deletions;
+        color: theme.status-deleted;
+        font-size: Typography.caption;
+        vertical-alignment: center;
+    }
+}
+
 // Comment count indicator
 component CommentBadge inherits HorizontalLayout {
     in property <ThemeColors> theme;
@@ -51,6 +75,8 @@ component TreeItem inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> focused: false;
     in property <bool> viewed: false;
+    in property <int> additions: 0;
+    in property <int> deletions: 0;
 
     callback clicked;
     callback toggle-expand;
@@ -163,6 +189,13 @@ component TreeItem inherits Rectangle {
 
         Rectangle { }
 
+        // Added/removed counts (files and aggregated folders)
+        if additions > 0 || deletions > 0: DiffStat {
+            theme: root.theme;
+            additions: root.additions;
+            deletions: root.deletions;
+        }
+
         // Comment count badge for files with comments
         if !is-folder && comment-count > 0: CommentBadge {
             theme: root.theme;
@@ -228,6 +261,8 @@ export component FileTree inherits Rectangle {
                     status: file.status;
                     comment-count: file.comment-count;
                     viewed: file.viewed;
+                    additions: file.additions;
+                    deletions: file.deletions;
                     selected: file.path == selected-file;
                     focused: idx == root.focused-index;
 
