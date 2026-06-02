@@ -86,6 +86,7 @@ component SideLine inherits Rectangle {
                 vertical-alignment: center;
                 x: 0;
                 width: parent.width - 8px;
+                height: 100%;
             }
         }
 
@@ -104,6 +105,7 @@ component SideLine inherits Rectangle {
                 font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                height: 100%;
             }
         }
 
@@ -114,6 +116,11 @@ component SideLine inherits Rectangle {
 
             HorizontalLayout {
                 x: 8px;
+                // Center the span strip as a block within the row. Setting
+                // height:100% + vertical-alignment:center on the individual
+                // Texts clips their glyph tops inside a layout; positioning the
+                // content-sized strip with y centers cleanly without clipping.
+                y: (parent.height - self.height) / 2;
                 alignment: start;
                 spacing: 0px;
 
