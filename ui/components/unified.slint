@@ -59,6 +59,8 @@ component UnifiedLine inherits Rectangle {
     in property <ThemeColors> theme;
     in property <DiffLine> line;
     in property <length> font-size: 13px;
+    in property <length> old-gutter-w: 50px;
+    in property <length> new-gutter-w: 50px;
 
     background: line.line-type == "add" ? theme.diff-add-bg :
                 line.line-type == "remove" ? theme.diff-remove-bg :
@@ -68,7 +70,7 @@ component UnifiedLine inherits Rectangle {
     HorizontalLayout {
         // Gutter - old line number
         Rectangle {
-            width: 50px;
+            width: root.old-gutter-w;
             background: line.line-type == "add" ? theme.diff-add-gutter :
                         line.line-type == "remove" ? theme.diff-remove-gutter :
                         theme.bg-secondary;
@@ -87,7 +89,7 @@ component UnifiedLine inherits Rectangle {
 
         // Gutter - new line number
         Rectangle {
-            width: 50px;
+            width: root.new-gutter-w;
             background: line.line-type == "add" ? theme.diff-add-gutter :
                         line.line-type == "remove" ? theme.diff-remove-gutter :
                         theme.bg-secondary;
@@ -173,6 +175,8 @@ component LineItem inherits Rectangle {
     in property <ThemeColors> theme;
     in property <DiffLine> line;
     in property <length> font-size: 13px;
+    in property <length> old-gutter-w: 50px;
+    in property <length> new-gutter-w: 50px;
 
     // Line height scales with font size (1.7x multiplier)
     height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
@@ -189,6 +193,8 @@ component LineItem inherits Rectangle {
         theme: root.theme;
         line: root.line;
         font-size: root.font-size;
+        old-gutter-w: root.old-gutter-w;
+        new-gutter-w: root.new-gutter-w;
         visible: root.line.line-type != "comment";
         width: 100%;
         height: 100%;
@@ -198,9 +204,16 @@ component LineItem inherits Rectangle {
 export component UnifiedView inherits Rectangle {
     in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
+    in property <int> old-gutter-digits: 0;
+    in property <int> new-gutter-digits: 0;
     in property <length> font-size: 13px;
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
+
+    // Content-sized gutters: ~9px per digit (safe for the 12px number font) plus
+    // padding; 0 digits collapses the column entirely (e.g. old col on a new file).
+    property <length> old-gutter-w: root.old-gutter-digits <= 0 ? 0px : root.old-gutter-digits * 9px + 8px;
+    property <length> new-gutter-w: root.new-gutter-digits <= 0 ? 0px : root.new-gutter-digits * 9px + 8px;
 
     background: theme.bg-primary;
 
@@ -215,6 +228,8 @@ export component UnifiedView inherits Rectangle {
                 theme: root.theme;
                 line: line;
                 font-size: root.font-size;
+                old-gutter-w: root.old-gutter-w;
+                new-gutter-w: root.new-gutter-w;
                 width: parent.width;
             }
         }

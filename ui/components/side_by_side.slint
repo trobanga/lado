@@ -63,6 +63,7 @@ component SideLine inherits Rectangle {
     in property <[TextSpan]> spans: [];
     in property <length> font-size: 13px;
     in property <bool> is-continuation: false;
+    in property <length> gutter-width: 50px;
 
     background: line-type == "add" ? theme.diff-add-bg :
                 line-type == "remove" ? theme.diff-remove-bg :
@@ -72,7 +73,7 @@ component SideLine inherits Rectangle {
     HorizontalLayout {
         // Gutter
         Rectangle {
-            width: 50px;
+            width: root.gutter-width;
             background: line-type == "add" ? theme.diff-add-gutter :
                         line-type == "remove" ? theme.diff-remove-gutter :
                         line-type == "empty" ? theme.bg-tertiary :
@@ -151,6 +152,7 @@ component LeftLineItem inherits Rectangle {
     in property <ThemeColors> theme;
     in property <DiffLine> line;
     in property <length> font-size: 13px;
+    in property <length> gutter-width: 50px;
 
     height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
@@ -173,6 +175,7 @@ component LeftLineItem inherits Rectangle {
         spans: root.line.line-type == "add" ? [] : root.line.spans;
         is-continuation: root.line.is-continuation;
         font-size: root.font-size;
+        gutter-width: root.gutter-width;
         width: 100%;
         height: 100%;
     }
@@ -182,6 +185,7 @@ component RightLineItem inherits Rectangle {
     in property <ThemeColors> theme;
     in property <DiffLine> line;
     in property <length> font-size: 13px;
+    in property <length> gutter-width: 50px;
 
     height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
@@ -204,6 +208,7 @@ component RightLineItem inherits Rectangle {
         spans: root.line.line-type == "remove" ? [] : root.line.spans;
         is-continuation: root.line.is-continuation;
         font-size: root.font-size;
+        gutter-width: root.gutter-width;
         width: 100%;
         height: 100%;
     }
@@ -212,9 +217,15 @@ component RightLineItem inherits Rectangle {
 export component SideBySideView inherits Rectangle {
     in property <ThemeColors> theme;
     in property <[DiffLine]> lines;
+    in property <int> old-gutter-digits: 0;
+    in property <int> new-gutter-digits: 0;
     in property <length> font-size: 13px;
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
+
+    // Content-sized gutters: left panel uses old numbers, right uses new.
+    property <length> old-gutter-w: root.old-gutter-digits <= 0 ? 0px : root.old-gutter-digits * 9px + 8px;
+    property <length> new-gutter-w: root.new-gutter-digits <= 0 ? 0px : root.new-gutter-digits * 9px + 8px;
 
     // Internal property for two-way binding with flickables
     property <length> internal-viewport-y: -root.scroll-position;
@@ -265,6 +276,7 @@ export component SideBySideView inherits Rectangle {
                         theme: root.theme;
                         line: line;
                         font-size: root.font-size;
+                        gutter-width: root.old-gutter-w;
                         width: parent.width;
                     }
                 }
@@ -320,6 +332,7 @@ export component SideBySideView inherits Rectangle {
                         theme: root.theme;
                         line: line;
                         font-size: root.font-size;
+                        gutter-width: root.new-gutter-w;
                         width: parent.width;
                     }
                 }

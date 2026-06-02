@@ -41,6 +41,10 @@ export component MainWindow inherits Window {
     in-out property <bool> select-mode: false;
     in-out property <string> selectable-text: "";
     in-out property <length> left-panel-width: 280px;
+    // Widest old/new line-number digit count for the current file; drives
+    // content-sized gutters (0 = that column has no numbers, e.g. a new file).
+    in-out property <int> old-gutter-digits: 0;
+    in-out property <int> new-gutter-digits: 0;
     in-out property <AppSettings> app-settings: {
         ui-theme: "dark",
         font-size: 13,
@@ -322,6 +326,8 @@ export component MainWindow inherits Window {
                     side-by-side: root.side-by-side-mode;
                     selected-file: root.selected-file;
                     lines: root.lines;
+                    old-gutter-digits: root.old-gutter-digits;
+                    new-gutter-digits: root.new-gutter-digits;
                     font-size: root.app-settings.font-size * 1px;
                     scroll-step: root.scroll-step;
                     viewed: root.selected-file-viewed;

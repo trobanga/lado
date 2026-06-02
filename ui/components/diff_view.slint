@@ -9,6 +9,8 @@ export component DiffView inherits Rectangle {
     in property <bool> side-by-side;
     in property <string> selected-file;
     in property <[DiffLine]> lines: [];
+    in property <int> old-gutter-digits: 0;
+    in property <int> new-gutter-digits: 0;
     in property <length> font-size: 13px;
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
@@ -122,6 +124,8 @@ export component DiffView inherits Rectangle {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
+            old-gutter-digits: root.old-gutter-digits;
+            new-gutter-digits: root.new-gutter-digits;
             font-size: root.font-size;
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;
@@ -131,6 +135,8 @@ export component DiffView inherits Rectangle {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
+            old-gutter-digits: root.old-gutter-digits;
+            new-gutter-digits: root.new-gutter-digits;
             font-size: root.font-size;
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;

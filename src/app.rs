@@ -239,8 +239,11 @@ impl App {
                 let comments = pr_comments.borrow();
                 let hl = highlighter.borrow();
                 let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
-                let lines = get_lines_for_file(data, &path_str, comments.as_ref(), &hl, wrap);
+                let (lines, old_digits, new_digits) =
+                    get_lines_for_file(data, &path_str, comments.as_ref(), &hl, wrap);
                 window.set_lines(lines);
+                window.set_old_gutter_digits(old_digits);
+                window.set_new_gutter_digits(new_digits);
                 window.set_selectable_text(data.selectable_text(&path_str).as_str().into());
             }
 
@@ -424,7 +427,7 @@ impl App {
                         window.set_selected_file_viewed(initial_viewed);
                         let hl = highlighter.borrow();
                         let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
-                        let lines = get_lines_for_file(
+                        let (lines, old_digits, new_digits) = get_lines_for_file(
                             &diff_data,
                             &initial.path,
                             grouped_comments.as_ref(),
@@ -432,6 +435,8 @@ impl App {
                             wrap,
                         );
                         window.set_lines(lines);
+                        window.set_old_gutter_digits(old_digits);
+                        window.set_new_gutter_digits(new_digits);
                         window.set_selectable_text(
                             diff_data.selectable_text(&initial.path).as_str().into(),
                         );
@@ -476,8 +481,11 @@ impl App {
                     let comments = pr_comments.borrow();
                     let hl = highlighter.borrow();
                     let wrap = settings.line_wrap_column.max(0) as usize;
-                    let lines = get_lines_for_file(data, &selected_file, comments.as_ref(), &hl, wrap);
+                    let (lines, old_digits, new_digits) =
+                        get_lines_for_file(data, &selected_file, comments.as_ref(), &hl, wrap);
                     window.set_lines(lines);
+                    window.set_old_gutter_digits(old_digits);
+                    window.set_new_gutter_digits(new_digits);
                     window.set_selectable_text(data.selectable_text(&selected_file).as_str().into());
                 }
             }
@@ -905,9 +913,11 @@ impl App {
                 let comments = self.pr_comments.borrow();
                 let hl = self.highlighter.borrow();
                 let wrap = self.window.get_app_settings().line_wrap_column.max(0) as usize;
-                let lines =
+                let (lines, old_digits, new_digits) =
                     get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl, wrap);
                 self.window.set_lines(lines);
+                self.window.set_old_gutter_digits(old_digits);
+                self.window.set_new_gutter_digits(new_digits);
                 self.window
                     .set_selectable_text(diff_data.selectable_text(&initial.path).as_str().into());
             }
@@ -941,7 +951,7 @@ fn get_lines_for_file(
     comments: Option<&FileComments>,
     highlighter: &Highlighter,
     wrap_column: usize,
-) -> ModelRc<DiffLine> {
+) -> (ModelRc<DiffLine>, i32, i32) {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
     use crate::models::{parse_hex_color, wrap_diff_line};
 
@@ -966,6 +976,18 @@ fn get_lines_for_file(
             std::iter::once(header_line).chain(hunk.lines)
         })
         .collect();
+
+    // Widest old/new line number → gutter digit count (0 = column has none).
+    let old_gutter_digits = diff_lines
+        .iter()
+        .filter_map(|l| l.old_line_num)
+        .max()
+        .map_or(0, |n| n.to_string().len() as i32);
+    let new_gutter_digits = diff_lines
+        .iter()
+        .filter_map(|l| l.new_line_num)
+        .max()
+        .map_or(0, |n| n.to_string().len() as i32);
 
     // Reconstruct file content from diff lines for syntax highlighting
     // We need to highlight the content to get spans for each line
@@ -1059,7 +1081,11 @@ fn get_lines_for_file(
         }
     }
 
-    ModelRc::new(VecModel::from(result))
+    (
+        ModelRc::new(VecModel::from(result)),
+        old_gutter_digits,
+        new_gutter_digits,
+    )
 }
 
 /// Format a GitHub timestamp to a more readable format
