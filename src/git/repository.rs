@@ -39,7 +39,7 @@ impl Repository {
 
         // Try to get from remote HEAD
         if let Ok(remote) = self.repo.find_remote("origin") {
-            if let Some(_url) = remote.url() {
+            if let Ok(_url) = remote.url() {
                 // Check for origin/main or origin/master
                 for branch in &["origin/main", "origin/master"] {
                     if self.repo.revparse_single(branch).is_ok() {
