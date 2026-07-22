@@ -1,7 +1,9 @@
 use crate::cli::{Args, DiffTarget};
+use crate::context_level::ContextLevel;
 use crate::git::{
-    build_file_tree, collect_folder_paths, collect_folder_paths_under, flatten_tree_with_state,
-    CommitInfo, DiffData, FileTreeNode, Repository,
+    build_file_tree, collect_folder_paths, collect_folder_paths_under, expand_tabs_in_hunks,
+    flatten_tree_with_state, hunks_cover_whole_file, selectable_text_for_hunks, CommitInfo,
+    DiffData, DiffHunk, FileTreeNode, Repository,
 };
 use crate::github::{self, FileComments};
 use crate::highlighting::Highlighter;
@@ -42,6 +44,199 @@ pub struct App {
     viewed_state: Rc<RefCell<ViewedState>>,
     /// Key derived from diff target for viewed state persistence
     target_key: String,
+    /// Single owner of "put this file's diff on screen"
+    renderer: DiffRenderer,
+}
+
+/// Puts one file's diff on screen.
+///
+/// Five things trigger a render — initial load, file selected, commit selected,
+/// settings changed, context stepped — and each has to set the same window
+/// properties from the same sources. Bundling the shared state here is what
+/// keeps them from drifting apart.
+#[derive(Clone)]
+struct DiffRenderer {
+    repo: Rc<Repository>,
+    diff_data: Rc<RefCell<Option<DiffData>>>,
+    pr_comments: Rc<RefCell<Option<FileComments>>>,
+    highlighter: Rc<RefCell<Highlighter>>,
+    /// The commit pair backing what is on screen. Not the same as the range
+    /// endpoints while a single commit is selected, and widening the context
+    /// has to re-diff the pair the user is actually looking at.
+    base: Rc<Cell<Option<Oid>>>,
+    head: Rc<Cell<Option<Oid>>>,
+    level: Rc<Cell<ContextLevel>>,
+    /// Hunks last recomputed at a wider context. Without it, changing a setting
+    /// would re-run the diff.
+    widened: Rc<RefCell<Option<WidenedHunks>>>,
+    /// Line counts for the file on screen. A function of the commit pair too,
+    /// so `set_scope` drops it; cached because deciding whether the view
+    /// already reaches both ends otherwise re-reads both blobs on every
+    /// settings change.
+    file_lines: Rc<RefCell<Option<FileLineCounts>>>,
+    /// Whether the last render already put every line of the file on screen.
+    /// Consulted when stepping, so `+` on a file with nothing left to reveal
+    /// stops rather than re-diffing its way to the same picture.
+    saturated: Rc<Cell<bool>>,
+}
+
+/// One file's hunks at a wider context, tagged with what they were computed
+/// for so a stale entry can't be mistaken for a fresh one.
+struct WidenedHunks {
+    path: String,
+    level: ContextLevel,
+    hunks: Vec<DiffHunk>,
+}
+
+/// How many lines one file has on each side of the diff.
+struct FileLineCounts {
+    path: String,
+    old: u32,
+    new: u32,
+}
+
+impl DiffRenderer {
+    /// Point the renderer at a different diff, dropping anything cached for the
+    /// previous one. Context returns to the default: an expansion is about the
+    /// file in front of you, not a mode you carry around.
+    fn set_scope(&self, base: Oid, head: Oid) {
+        self.base.set(Some(base));
+        self.head.set(Some(head));
+        *self.file_lines.borrow_mut() = None;
+        self.reset_level();
+    }
+
+    fn reset_level(&self) {
+        self.level.set(ContextLevel::DEFAULT);
+        *self.widened.borrow_mut() = None;
+    }
+
+    fn cached_hunks(&self, path: &str) -> Vec<DiffHunk> {
+        self.diff_data
+            .borrow()
+            .as_ref()
+            .and_then(|d| d.file_hunks.get(path).cloned())
+            .unwrap_or_default()
+    }
+
+    /// The hunks to display for `path`: the ones from the loaded diff at the
+    /// default rung, or a re-diff of just this file at a wider one.
+    fn hunks_for(&self, path: &str, tab_width: usize) -> Vec<DiffHunk> {
+        let level = self.level.get();
+        if level == ContextLevel::DEFAULT {
+            return self.cached_hunks(path);
+        }
+
+        let cached = self
+            .widened
+            .borrow()
+            .as_ref()
+            .filter(|w| w.path == path && w.level == level)
+            .map(|w| w.hunks.clone());
+        if let Some(hunks) = cached {
+            return hunks;
+        }
+
+        let (Some(base), Some(head)) = (self.base.get(), self.head.get()) else {
+            return self.cached_hunks(path);
+        };
+
+        match self.repo.diff_file_at_context(base, head, path, level.lines()) {
+            Ok(mut hunks) => {
+                expand_tabs_in_hunks(&mut hunks, tab_width);
+                *self.widened.borrow_mut() = Some(WidenedHunks {
+                    path: path.to_string(),
+                    level,
+                    hunks: hunks.clone(),
+                });
+                hunks
+            }
+            Err(e) => {
+                // Fall back to the narrow view rather than blanking the file.
+                eprintln!("Warning: could not widen context for {}: {}", path, e);
+                self.cached_hunks(path)
+            }
+        }
+    }
+
+    /// Lines on each side of `path`, old first. `None` when the commit pair or
+    /// the blobs can't be read.
+    fn line_counts(&self, path: &str) -> Option<(u32, u32)> {
+        let cached = self
+            .file_lines
+            .borrow()
+            .as_ref()
+            .filter(|c| c.path == path)
+            .map(|c| (c.old, c.new));
+        if let Some(counts) = cached {
+            return Some(counts);
+        }
+
+        let (base, head) = (self.base.get()?, self.head.get()?);
+        let (old, new) = self.repo.file_line_counts(base, head, path).ok()?;
+        *self.file_lines.borrow_mut() = Some(FileLineCounts {
+            path: path.to_string(),
+            old,
+            new,
+        });
+        Some((old, new))
+    }
+
+    fn render(&self, window: &MainWindow, path: &str) {
+        if path.is_empty() {
+            return;
+        }
+        let settings = window.get_app_settings();
+        let hunks = self.hunks_for(path, settings.tab_width as usize);
+
+        let comments = self.pr_comments.borrow();
+        let hl = self.highlighter.borrow();
+        let wrap = settings.line_wrap_column.max(0) as usize;
+        let (lines, old_digits, new_digits) = get_lines_for_file(
+            &hunks,
+            path,
+            comments.as_ref().and_then(|c| c.get(path)),
+            &hl,
+            wrap,
+        );
+
+        window.set_lines(lines);
+        window.set_old_gutter_digits(old_digits);
+        window.set_new_gutter_digits(new_digits);
+        window.set_selectable_text(selectable_text_for_hunks(&hunks).as_str().into());
+
+        // A short file is showing everything long before the top rung, so the
+        // control has to read the picture rather than the ladder position.
+        let level = self.level.get();
+        let covers_whole_file = level.is_whole_file()
+            || self
+                .line_counts(path)
+                .is_some_and(|(old, new)| hunks_cover_whole_file(&hunks, old, new));
+        self.saturated.set(covers_whole_file);
+        window.set_context_level_label(level.label(covers_whole_file).as_str().into());
+        window.set_context_expandable(!covers_whole_file);
+    }
+
+    /// Move one rung and redraw. A step that can't change the picture — past
+    /// either end of the ladder, or wider when every line is already on screen
+    /// — skips the re-render entirely.
+    fn step_context(&self, window: &MainWindow, expand: bool) {
+        if expand && self.saturated.get() {
+            return;
+        }
+        let current = self.level.get();
+        let next = if expand {
+            current.expanded()
+        } else {
+            current.collapsed()
+        };
+        if next == current {
+            return;
+        }
+        self.level.set(next);
+        let path = window.get_selected_file().to_string();
+        self.render(window, &path);
+    }
 }
 
 /// Format the "behind base" indicator appended to the PR diff title.
@@ -183,6 +378,8 @@ impl App {
             key_file_prev: config.key_file_prev.clone().into(),
             key_prev_commit: config.key_prev_commit.clone().into(),
             key_next_commit: config.key_next_commit.clone().into(),
+            key_expand_context: config.key_expand_context.clone().into(),
+            key_collapse_context: config.key_collapse_context.clone().into(),
         });
         // Apply theme from config (theme is derived from theme-name in Slint)
         window.set_theme_name(config.ui_theme.clone().into());
@@ -207,21 +404,39 @@ impl App {
         let viewed_state = Rc::new(RefCell::new(ViewedState::load()));
         let target_key = viewed_state::target_key(&target);
 
+        let diff_data = Rc::new(RefCell::new(None));
+        let pr_comments = Rc::new(RefCell::new(None));
+        let highlighter = Rc::new(RefCell::new(highlighter));
+
+        let renderer = DiffRenderer {
+            repo: Rc::clone(&repo),
+            diff_data: Rc::clone(&diff_data),
+            pr_comments: Rc::clone(&pr_comments),
+            highlighter: Rc::clone(&highlighter),
+            base: Rc::new(Cell::new(None)),
+            head: Rc::new(Cell::new(None)),
+            level: Rc::new(Cell::new(ContextLevel::DEFAULT)),
+            widened: Rc::new(RefCell::new(None)),
+            file_lines: Rc::new(RefCell::new(None)),
+            saturated: Rc::new(Cell::new(false)),
+        };
+
         let app = Self {
             window,
             repo,
             target,
-            diff_data: Rc::new(RefCell::new(None)),
-            pr_comments: Rc::new(RefCell::new(None)),
+            diff_data,
+            pr_comments,
             commits: Rc::new(RefCell::new(Vec::new())),
             all_pr_comments: Rc::new(RefCell::new(Vec::new())),
             range_base: Rc::new(Cell::new(None)),
             range_head: Rc::new(Cell::new(None)),
-            highlighter: Rc::new(RefCell::new(highlighter)),
+            highlighter,
             file_tree: Rc::new(RefCell::new(Vec::new())),
             expanded_state: Rc::new(RefCell::new(HashMap::new())),
             viewed_state,
             target_key,
+            renderer,
         };
 
         app.setup_callbacks()?;
@@ -233,8 +448,7 @@ impl App {
     fn setup_callbacks(&self) -> Result<()> {
         let window_weak = self.window.as_weak();
         let diff_data = Rc::clone(&self.diff_data);
-        let pr_comments = Rc::clone(&self.pr_comments);
-        let highlighter = Rc::clone(&self.highlighter);
+        let renderer = self.renderer.clone();
         let viewed_state_for_select = Rc::clone(&self.viewed_state);
         let target_key_for_select = self.target_key.clone();
 
@@ -243,19 +457,12 @@ impl App {
             let window = window_weak.unwrap();
             let path_str = path.to_string();
 
-            let data_borrow = diff_data.borrow();
-            if let Some(ref data) = *data_borrow {
-                let comments = pr_comments.borrow();
-                let hl = highlighter.borrow();
-                let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
-                let (lines, old_digits, new_digits) =
-                    get_lines_for_file(data, &path_str, comments.as_ref(), &hl, wrap);
-                window.set_lines(lines);
-                window.set_old_gutter_digits(old_digits);
-                window.set_new_gutter_digits(new_digits);
-                window.set_selectable_text(data.selectable_text(&path_str).as_str().into());
-            }
+            // A new file starts at the default width — expansion is scoped to
+            // the file you were looking at, not carried across the tree.
+            renderer.reset_level();
+            renderer.render(&window, &path_str);
 
+            let data_borrow = diff_data.borrow();
             let viewed = is_path_viewed(
                 &path_str,
                 &viewed_state_for_select.borrow(),
@@ -340,17 +547,21 @@ impl App {
         let range_base = Rc::clone(&self.range_base);
         let range_head = Rc::clone(&self.range_head);
         let all_pr_comments = Rc::clone(&self.all_pr_comments);
-        let highlighter = Rc::clone(&self.highlighter);
+        let renderer_for_commit = self.renderer.clone();
         self.window.on_commit_selected(move |idx| {
             let window = window_weak.unwrap();
             let commits = all_commits.borrow();
             let comments = all_pr_comments.borrow();
 
+            // The endpoints this view is diffing, kept alongside the result so
+            // later renders (and context expansion) work against the same pair.
+            let mut scope: Option<(Oid, Oid)> = None;
             let diff_result: Option<(Result<DiffData>, Option<FileComments>)> = if idx < 0 {
                 // "All changes" - diff base to head
                 if let (Some(b), Some(h)) = (range_base.get(), range_head.get()) {
                     // Show all comments for full diff
                     let grouped = github::group_comments_by_file(comments.clone());
+                    scope = Some((b, h));
                     Some((repo.diff_commits(b, h), Some(grouped)))
                 } else {
                     None
@@ -368,6 +579,7 @@ impl App {
                             .cloned()
                             .collect();
                         let grouped = github::group_comments_by_file(filtered);
+                        scope = Some((p, c));
                         Some((repo.diff_commits(p, c), Some(grouped)))
                     } else {
                         None
@@ -383,6 +595,7 @@ impl App {
                             .cloned()
                             .collect();
                         let grouped = github::group_comments_by_file(filtered);
+                        scope = Some((b, c));
                         Some((repo.diff_commits(b, c), Some(grouped)))
                     } else {
                         None
@@ -394,6 +607,13 @@ impl App {
 
             if let Some((Ok(mut diff_data), grouped_comments)) = diff_result {
                 diff_data.expand_tabs(window.get_app_settings().tab_width as usize);
+                // Publish before rendering: every later interaction (selecting
+                // another file, widening the context) reads this shared state,
+                // and leaving it on the previous diff is what made the tree and
+                // the diff view disagree.
+                if let Some((base, head)) = scope {
+                    renderer_for_commit.set_scope(base, head);
+                }
                 // Build hierarchical file tree and flatten for UI
                 // Use empty expanded state for commit-specific views (fresh view each time)
                 let tree = build_file_tree(&diff_data.files);
@@ -402,6 +622,9 @@ impl App {
 
                 let file_entries =
                     build_file_entries(&flat_entries, grouped_comments.as_ref(), Some(&diff_data), None);
+
+                *renderer_for_commit.diff_data.borrow_mut() = Some(diff_data);
+                *renderer_for_commit.pr_comments.borrow_mut() = grouped_comments;
 
                 let initial_focus = find_initial_focus_index(&file_entries);
                 let initial_viewed = if initial_focus >= 0 {
@@ -421,21 +644,7 @@ impl App {
                         window.set_focused_index(initial_focus);
                         window.set_selected_file(initial.path.clone().into());
                         window.set_selected_file_viewed(initial_viewed);
-                        let hl = highlighter.borrow();
-                        let wrap = window.get_app_settings().line_wrap_column.max(0) as usize;
-                        let (lines, old_digits, new_digits) = get_lines_for_file(
-                            &diff_data,
-                            &initial.path,
-                            grouped_comments.as_ref(),
-                            &hl,
-                            wrap,
-                        );
-                        window.set_lines(lines);
-                        window.set_old_gutter_digits(old_digits);
-                        window.set_new_gutter_digits(new_digits);
-                        window.set_selectable_text(
-                            diff_data.selectable_text(&initial.path).as_str().into(),
-                        );
+                        renderer_for_commit.render(&window, &initial.path);
                     }
                 }
             }
@@ -444,8 +653,7 @@ impl App {
         // Settings changed callback
         let highlighter = Rc::clone(&self.highlighter);
         let window_weak = self.window.as_weak();
-        let diff_data = Rc::clone(&self.diff_data);
-        let pr_comments = Rc::clone(&self.pr_comments);
+        let renderer_for_settings = self.renderer.clone();
         self.window.on_settings_changed(move |settings| {
             // Persist settings to config file
             let window = window_weak.unwrap();
@@ -463,6 +671,8 @@ impl App {
                 key_file_prev: settings.key_file_prev.to_string(),
                 key_prev_commit: settings.key_prev_commit.to_string(),
                 key_next_commit: settings.key_next_commit.to_string(),
+                key_expand_context: settings.key_expand_context.to_string(),
+                key_collapse_context: settings.key_collapse_context.to_string(),
             };
             if let Err(e) = crate::config::save(&config) {
                 eprintln!("Warning: Could not save settings: {}", e);
@@ -470,21 +680,10 @@ impl App {
 
             highlighter.borrow_mut().set_theme(settings.ui_theme.as_str());
 
-            // Re-highlight currently selected file
+            // Re-highlight currently selected file, keeping whatever context
+            // width the user had expanded to.
             let selected_file = window.get_selected_file().to_string();
-            if !selected_file.is_empty() {
-                if let Some(ref data) = *diff_data.borrow() {
-                    let comments = pr_comments.borrow();
-                    let hl = highlighter.borrow();
-                    let wrap = settings.line_wrap_column.max(0) as usize;
-                    let (lines, old_digits, new_digits) =
-                        get_lines_for_file(data, &selected_file, comments.as_ref(), &hl, wrap);
-                    window.set_lines(lines);
-                    window.set_old_gutter_digits(old_digits);
-                    window.set_new_gutter_digits(new_digits);
-                    window.set_selectable_text(data.selectable_text(&selected_file).as_str().into());
-                }
-            }
+            renderer_for_settings.render(&window, &selected_file);
         });
 
         // Find next file callback (skips directories)
@@ -782,6 +981,20 @@ impl App {
             }
         });
 
+        // Context expansion: widen / narrow the unchanged code shown around
+        // each change in the current file.
+        let window_weak = self.window.as_weak();
+        let renderer = self.renderer.clone();
+        self.window.on_expand_context(move || {
+            renderer.step_context(&window_weak.unwrap(), true);
+        });
+
+        let window_weak = self.window.as_weak();
+        let renderer = self.renderer.clone();
+        self.window.on_collapse_context(move || {
+            renderer.step_context(&window_weak.unwrap(), false);
+        });
+
         Ok(())
     }
 
@@ -889,6 +1102,7 @@ impl App {
 
         self.range_base.set(Some(base_oid));
         self.range_head.set(Some(head_oid));
+        self.renderer.set_scope(base_oid, head_oid);
 
         // The PR arm already filled the list from the GitHub API; for plain refs
         // the commits come from a local walk of base..HEAD.
@@ -922,6 +1136,7 @@ impl App {
 
         // Load the diff for the initial focus row and keep focused-index in sync
         // with selected-file so the header "viewed" state is driven by the same row.
+        let mut initial_path: Option<String> = None;
         if initial_focus >= 0 {
             if let Some(initial) = flat_entries.get(initial_focus as usize) {
                 self.window.set_focused_index(initial_focus);
@@ -933,22 +1148,18 @@ impl App {
                     &self.target_key,
                 );
                 self.window.set_selected_file_viewed(viewed);
-                let comments = self.pr_comments.borrow();
-                let hl = self.highlighter.borrow();
-                let wrap = self.window.get_app_settings().line_wrap_column.max(0) as usize;
-                let (lines, old_digits, new_digits) =
-                    get_lines_for_file(&diff_data, &initial.path, comments.as_ref(), &hl, wrap);
-                self.window.set_lines(lines);
-                self.window.set_old_gutter_digits(old_digits);
-                self.window.set_new_gutter_digits(new_digits);
-                self.window
-                    .set_selectable_text(diff_data.selectable_text(&initial.path).as_str().into());
+                initial_path = Some(initial.path.clone());
             }
         }
 
         // Store for later use in callbacks
         *self.file_tree.borrow_mut() = tree;
         *self.diff_data.borrow_mut() = Some(diff_data);
+
+        // Renders from the shared state above, so it has to run after the store.
+        if let Some(path) = initial_path {
+            self.renderer.render(&self.window, &path);
+        }
 
         Ok(())
     }
@@ -980,23 +1191,19 @@ fn set_diff_summary(window: &MainWindow, data: &DiffData) {
 }
 
 fn get_lines_for_file(
-    data: &DiffData,
+    hunks: &[DiffHunk],
     path: &str,
-    comments: Option<&FileComments>,
+    file_comments: Option<&Vec<github::PrComment>>,
     highlighter: &Highlighter,
     wrap_column: usize,
 ) -> (ModelRc<DiffLine>, i32, i32) {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
     use crate::models::{parse_hex_color, wrap_diff_line};
 
-    let hunks = data.file_hunks.get(path).cloned().unwrap_or_default();
-
-    // Get comments for this file, if any
-    let file_comments = comments.and_then(|c| c.get(path));
-
     // First, collect all diff lines with their line numbers
     let diff_lines: Vec<GitDiffLine> = hunks
-        .into_iter()
+        .iter()
+        .cloned()
         .flat_map(|hunk| {
             // Create hunk header line (trim trailing newline from git2)
             let header_line = GitDiffLine {

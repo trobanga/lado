@@ -177,6 +177,14 @@ component LineItem inherits Rectangle {
     in property <length> font-size: 13px;
     in property <length> old-gutter-w: 50px;
     in property <length> new-gutter-w: 50px;
+    in property <bool> context-expandable: true;
+    // Viewport-relative right edge. Rows are as wide as the horizontally
+    // scrollable viewport, so anchoring the hint to the row would park it far
+    // off-screen; this keeps it against the visible edge as the view scrolls.
+    in property <length> hint-right: 0;
+    callback expand-context();
+
+    property <bool> is-hunk-header: root.line.line-type == "hunk";
 
     // Line height scales with font size (1.7x multiplier)
     height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
@@ -199,6 +207,28 @@ component LineItem inherits Rectangle {
         width: 100%;
         height: 100%;
     }
+
+    // A hunk header is the boundary of what's shown, so it's the natural place
+    // to ask for more. Overlaid last so it wins hit-testing over the row.
+    if root.is-hunk-header && root.context-expandable: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: hunk-touch.has-hover ? theme.accent-primary.with-alpha(0.12) : transparent;
+
+        Text {
+            x: root.hint-right - self.width;
+            text: "+ more context";
+            color: hunk-touch.has-hover ? theme.accent-primary : theme.text-muted;
+            font-size: 11px;
+            vertical-alignment: center;
+            height: 100%;
+        }
+
+        hunk-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.expand-context(); }
+        }
+    }
 }
 
 export component UnifiedView inherits Rectangle {
@@ -209,6 +239,8 @@ export component UnifiedView inherits Rectangle {
     in property <length> font-size: 13px;
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
+    in property <bool> context-expandable: true;
+    callback expand-context();
 
     // Content-sized gutters: ~9px per digit (safe for the 12px number font) plus
     // padding; 0 digits collapses the column entirely (e.g. old col on a new file).
@@ -231,6 +263,9 @@ export component UnifiedView inherits Rectangle {
                 old-gutter-w: root.old-gutter-w;
                 new-gutter-w: root.new-gutter-w;
                 width: parent.width;
+                context-expandable: root.context-expandable;
+                hint-right: -flickable.viewport-x + flickable.width - 12px;
+                expand-context => { root.expand-context(); }
             }
         }
     }

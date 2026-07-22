@@ -24,6 +24,8 @@ pub struct Config {
     pub key_file_prev: String,
     pub key_prev_commit: String,
     pub key_next_commit: String,
+    pub key_expand_context: String,
+    pub key_collapse_context: String,
 }
 
 impl Default for Config {
@@ -42,6 +44,8 @@ impl Default for Config {
             key_file_prev: "K".to_string(),
             key_prev_commit: "[".to_string(),
             key_next_commit: "]".to_string(),
+            key_expand_context: "+".to_string(),
+            key_collapse_context: "-".to_string(),
         }
     }
 }
@@ -97,6 +101,33 @@ mod tests {
     }
 
     #[test]
+    fn config_written_before_context_keys_existed_still_gets_them() {
+        // Every user upgrading has a config.toml without these keys. If the
+        // missing fields came back as empty strings, the new bindings would be
+        // silently dead for exactly the people who already use lado.
+        let old = r#"
+            ui_theme = "dark"
+            font_size = 14
+            tab_width = 4
+            line_wrap_column = 100
+            panel_width = 280.0
+            key_unified = "u"
+            key_side_by_side = "s"
+            key_scroll_down = "j"
+            key_scroll_up = "k"
+            key_file_next = "J"
+            key_file_prev = "K"
+            key_prev_commit = "["
+            key_next_commit = "]"
+        "#;
+
+        let config: Config = toml::from_str(old).expect("parse pre-existing config");
+
+        assert_eq!(config.key_expand_context, "+");
+        assert_eq!(config.key_collapse_context, "-");
+    }
+
+    #[test]
     fn test_serialize_deserialize() {
         let config = Config {
             ui_theme: "light".to_string(),
@@ -112,6 +143,8 @@ mod tests {
             key_file_prev: "K".to_string(),
             key_prev_commit: "[".to_string(),
             key_next_commit: "]".to_string(),
+            key_expand_context: "+".to_string(),
+            key_collapse_context: "-".to_string(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();

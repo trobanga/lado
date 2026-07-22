@@ -1,6 +1,7 @@
 mod app;
 mod cli;
 mod config;
+mod context_level;
 mod git;
 mod github;
 mod highlighting;

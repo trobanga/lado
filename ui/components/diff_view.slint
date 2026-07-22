@@ -20,8 +20,14 @@ export component DiffView inherits Rectangle {
     // Native Slint Text isn't selectable; TextInput is.
     in property <bool> select-mode: false;
     in property <string> selectable-text: "";
+    // How much unchanged code surrounds each change, e.g. "±3 lines".
+    in property <string> context-level-label: "";
+    in property <bool> context-expandable: true;
 
     callback toggle-viewed();
+    // Widen the context by one rung. Raised by the header control and by
+    // clicking any hunk header.
+    callback expand-context();
     // Asks the parent to leave select mode (it owns the select-mode property
     // and the keyboard focus that must return to the main view).
     callback exit-select();
@@ -75,10 +81,44 @@ export component DiffView inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                // Viewed checkbox
+                // Context width + viewed checkbox
                 HorizontalLayout {
                     spacing: 6px;
                     alignment: end;
+
+                    // Current context width, doubling as an expand button. Keeps
+                    // the "+ does nothing now" case legible: at the top rung the
+                    // label reads "whole file" and the control goes inert.
+                    Rectangle {
+                        width: ctx-label.preferred-width + 16px;
+                        y: (parent.height - self.height) / 2;
+                        height: root.font-size * 1.4;
+                        border-radius: 3px;
+                        border-width: 1px;
+                        border-color: ctx-touch.has-hover && root.context-expandable
+                            ? theme.accent-primary : theme.border-normal;
+                        background: ctx-touch.has-hover && root.context-expandable
+                            ? theme.accent-primary.with-alpha(0.15) : transparent;
+
+                        ctx-label := Text {
+                            text: root.context-expandable
+                                ? root.context-level-label + "  +"
+                                : root.context-level-label;
+                            color: root.context-expandable ? theme.text-primary : theme.text-muted;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        ctx-touch := TouchArea {
+                            mouse-cursor: root.context-expandable ? pointer : default;
+                            clicked => {
+                                if (root.context-expandable) {
+                                    root.expand-context();
+                                }
+                            }
+                        }
+                    }
 
                     Text {
                         text: "Viewed";
@@ -129,6 +169,8 @@ export component DiffView inherits Rectangle {
             font-size: root.font-size;
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;
+            context-expandable: root.context-expandable;
+            expand-context => { root.expand-context(); }
         }
 
         if !root.select-mode && root.side-by-side: SideBySideView {
@@ -140,6 +182,8 @@ export component DiffView inherits Rectangle {
             font-size: root.font-size;
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;
+            context-expandable: root.context-expandable;
+            expand-context => { root.expand-context(); }
         }
 
         // Selectable plain-text mode

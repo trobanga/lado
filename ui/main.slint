@@ -64,7 +64,15 @@ export component MainWindow inherits Window {
         key-file-prev: "K",
         key-prev-commit: "[",
         key-next-commit: "]",
+        key-expand-context: "+",
+        key-collapse-context: "-",
     };
+
+    // How much unchanged code surrounds each change in the current file, e.g.
+    // "±3 lines" or "whole file". Shown in the file header so stepping past the
+    // end of the ladder reads as a no-op rather than a dead key.
+    in-out property <string> context-level-label: "±3 lines";
+    in-out property <bool> context-expandable: true;
     in-out property <int> focused-index: 0;
     // Viewed state of the file currently shown in the diff view. Driven by
     // selected-file (a path), not focused-index, so it stays correct even when
@@ -91,6 +99,10 @@ export component MainWindow inherits Window {
     // Used by the diff view header so it works even when the file is hidden
     // from the tree by a collapsed ancestor.
     callback toggle-selected-viewed();
+    // Widen / narrow the unchanged code shown around each change in the
+    // current file, one rung at a time.
+    callback expand-context();
+    callback collapse-context();
 
     init => {
         main-focus.focus();
@@ -152,6 +164,16 @@ export component MainWindow inherits Window {
             }
             if (event.text == root.app-settings.key-scroll-up) {
                 diff-view.scroll-position = max(0px, diff-view.scroll-position - root.scroll-step);
+                return accept;
+            }
+
+            // CONTEXT EXPANSION (+ / -) - widen the code shown around changes
+            if (event.text == root.app-settings.key-expand-context) {
+                root.expand-context();
+                return accept;
+            }
+            if (event.text == root.app-settings.key-collapse-context) {
+                root.collapse-context();
                 return accept;
             }
 
@@ -343,8 +365,13 @@ export component MainWindow inherits Window {
                     viewed: root.selected-file-viewed;
                     select-mode: root.select-mode;
                     selectable-text: root.selectable-text;
+                    context-level-label: root.context-level-label;
+                    context-expandable: root.context-expandable;
                     toggle-viewed => {
                         root.toggle-selected-viewed();
+                    }
+                    expand-context => {
+                        root.expand-context();
                     }
                     exit-select => {
                         root.select-mode = false;

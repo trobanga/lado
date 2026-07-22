@@ -145,7 +145,7 @@ export component HelpOverlay inherits Rectangle {
 
             // Scrollable content
             Flickable {
-                viewport-height: 668px;
+                viewport-height: 728px;
 
                 VerticalLayout {
                     spacing: 0px;
@@ -163,6 +163,8 @@ export component HelpOverlay inherits Rectangle {
                     KeyRow { theme: root.theme; key: settings.key-unified; description: "Unified diff view"; }
                     KeyRow { theme: root.theme; key: settings.key-side-by-side; description: "Side-by-side diff view"; }
                     KeyRow { theme: root.theme; key: "y"; description: "Select text mode (drag to select, Ctrl+C)"; }
+                    KeyRow { theme: root.theme; key: settings.key-expand-context; description: "More context around changes"; }
+                    KeyRow { theme: root.theme; key: settings.key-collapse-context; description: "Less context around changes"; }
 
                     SectionHeader { theme: root.theme; title: "FILE TREE"; }
                     KeyRow { theme: root.theme; key: "e"; description: "Toggle expand/collapse folder"; }

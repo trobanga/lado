@@ -7,6 +7,14 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+/// Unchanged lines git keeps on each side of a change by default.
+pub const DEFAULT_CONTEXT_LINES: u32 = 3;
+
+/// Context width that makes libgit2 emit a file as a single whole-file hunk.
+/// Comfortably larger than any plausible source file, yet far enough below
+/// `u32::MAX` that libgit2's internal context arithmetic cannot overflow.
+pub const FULL_FILE_CONTEXT_LINES: u32 = 1_000_000;
+
 pub struct Repository {
     repo: Git2Repo,
 }
@@ -152,8 +160,69 @@ impl Repository {
         Ok(commits)
     }
 
-    /// Compute diff between two commits
+    /// Compute diff between two commits, with the default amount of
+    /// surrounding context.
     pub fn diff_commits(&self, base_oid: Oid, head_oid: Oid) -> Result<DiffData> {
+        self.diff_trees(base_oid, head_oid, DEFAULT_CONTEXT_LINES, None)
+    }
+
+    /// Re-diff a single file with a chosen amount of surrounding context.
+    ///
+    /// Widening the context is delegated to libgit2 rather than spliced in from
+    /// the file blob: that way hunks merge when their contexts meet, the last
+    /// hunk clamps at EOF, and added/deleted/binary files need no special
+    /// casing. Restricting to one path keeps the cost proportional to the file
+    /// the user is looking at, not the whole diff.
+    pub fn diff_file_at_context(
+        &self,
+        base_oid: Oid,
+        head_oid: Oid,
+        path: &str,
+        context_lines: u32,
+    ) -> Result<Vec<DiffHunk>> {
+        let data = self.diff_trees(base_oid, head_oid, context_lines, Some(path))?;
+        Ok(data.file_hunks.get(path).cloned().unwrap_or_default())
+    }
+
+    /// How many lines `path` has in each of the two trees, old side first.
+    ///
+    /// A side the file is absent from — or that holds something without lines,
+    /// like a binary blob — counts as zero, which is what an added or deleted
+    /// file's hunk reports for that side too.
+    pub fn file_line_counts(&self, base_oid: Oid, head_oid: Oid, path: &str) -> Result<(u32, u32)> {
+        Ok((
+            self.blob_line_count(base_oid, path)?,
+            self.blob_line_count(head_oid, path)?,
+        ))
+    }
+
+    fn blob_line_count(&self, oid: Oid, path: &str) -> Result<u32> {
+        let tree = self
+            .repo
+            .find_commit(oid)
+            .context("Failed to find commit")?
+            .tree()
+            .context("Failed to get commit tree")?;
+
+        // Absent from this side (added or deleted), or not a blob: no lines.
+        let Ok(entry) = tree.get_path(Path::new(path)) else {
+            return Ok(0);
+        };
+        let object = entry.to_object(&self.repo).context("Failed to read entry")?;
+        let Some(blob) = object.as_blob() else {
+            return Ok(0);
+        };
+
+        Ok(count_lines(blob.content()))
+    }
+
+    fn diff_trees(
+        &self,
+        base_oid: Oid,
+        head_oid: Oid,
+        context_lines: u32,
+        pathspec: Option<&str>,
+    ) -> Result<DiffData> {
         let base_commit = self
             .repo
             .find_commit(base_oid)
@@ -171,7 +240,10 @@ impl Repository {
             .context("Failed to get head commit tree")?;
 
         let mut opts = DiffOptions::new();
-        opts.context_lines(3);
+        opts.context_lines(context_lines);
+        if let Some(path) = pathspec {
+            opts.pathspec(path);
+        }
 
         let diff = self
             .repo
@@ -287,8 +359,21 @@ impl Repository {
     }
 }
 
+/// Count lines the way a diff does: a trailing newline terminates the last
+/// line rather than starting an empty one, but content without it still ends
+/// in a line.
+fn count_lines(content: &[u8]) -> u32 {
+    if content.is_empty() {
+        return 0;
+    }
+    let terminated = content.iter().filter(|b| **b == b'\n').count();
+    let unterminated_tail = usize::from(!content.ends_with(b"\n"));
+    (terminated + unterminated_tail) as u32
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::diff::hunks_cover_whole_file;
     use super::*;
     use tempfile::TempDir;
 
@@ -333,6 +418,142 @@ mod tests {
         }
 
         (dir, Repository { repo: git }, oids)
+    }
+
+    /// A repo whose `name` holds `total` numbered lines, plus a second
+    /// commit that rewrites line `edited` (1-based). Returns base and head.
+    fn repo_with_one_line_edited(
+        name: &str,
+        total: usize,
+        edited: usize,
+    ) -> (TempDir, Repository, Oid, Oid) {
+        let dir = TempDir::new().expect("create temp dir");
+        let git = Git2Repo::init(dir.path()).expect("git init");
+
+        let original: String = (1..=total).map(|i| format!("line {i}\n")).collect();
+        let modified: String = (1..=total)
+            .map(|i| {
+                if i == edited {
+                    "CHANGED\n".to_string()
+                } else {
+                    format!("line {i}\n")
+                }
+            })
+            .collect();
+
+        let mut oids = Vec::new();
+        for content in [original, modified] {
+            let blob = git.blob(content.as_bytes()).expect("write blob");
+            let mut builder = git.treebuilder(None).expect("tree builder");
+            builder
+                .insert(name, blob, git2::FileMode::Blob.into())
+                .expect("insert blob");
+            let tree_oid = builder.write().expect("write tree");
+            let tree = git.find_tree(tree_oid).expect("find tree");
+
+            let sig = git2::Signature::now("Tester", "tester@example.com").expect("signature");
+            let parents: Vec<git2::Commit> = oids
+                .last()
+                .map(|oid| git.find_commit(*oid).expect("find parent"))
+                .into_iter()
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+
+            let oid = git
+                .commit(Some("HEAD"), &sig, &sig, "commit", &tree, &parent_refs)
+                .expect("commit");
+            oids.push(oid);
+        }
+
+        (dir, Repository { repo: git }, oids[0], oids[1])
+    }
+
+    fn has_line(hunks: &[DiffHunk], content: &str) -> bool {
+        hunks
+            .iter()
+            .any(|h| h.lines.iter().any(|l| l.content == content))
+    }
+
+    #[test]
+    fn full_context_reaches_lines_far_from_the_change() {
+        let (_dir, repo, base, head) = repo_with_one_line_edited("file.txt", 30, 15);
+
+        // Default context keeps the view tight around the edit...
+        let narrow = repo
+            .diff_file_at_context(base, head, "file.txt", DEFAULT_CONTEXT_LINES)
+            .expect("narrow diff");
+        assert!(has_line(&narrow, "CHANGED"));
+        assert!(!has_line(&narrow, "line 1"));
+        assert!(!has_line(&narrow, "line 30"));
+
+        // ...while full context pulls in the whole file, top to bottom.
+        let full = repo
+            .diff_file_at_context(base, head, "file.txt", FULL_FILE_CONTEXT_LINES)
+            .expect("full diff");
+        assert!(has_line(&full, "line 1"));
+        assert!(has_line(&full, "line 30"));
+    }
+
+    #[test]
+    fn a_short_file_is_already_whole_at_the_default_context() {
+        // Five lines with one edit: git's usual ±3 already reaches both ends,
+        // so there is nothing left for an expansion to reveal.
+        let (_dir, repo, base, head) = repo_with_one_line_edited("file.txt", 5, 3);
+        let (old_total, new_total) = repo
+            .file_line_counts(base, head, "file.txt")
+            .expect("line counts");
+        let hunks = repo
+            .diff_file_at_context(base, head, "file.txt", DEFAULT_CONTEXT_LINES)
+            .expect("narrow diff");
+
+        assert!(hunks_cover_whole_file(&hunks, old_total, new_total));
+
+        // A file long enough to have lines outside that window does not.
+        let (_dir, repo, base, head) = repo_with_one_line_edited("long.txt", 30, 15);
+        let (old_total, new_total) = repo
+            .file_line_counts(base, head, "long.txt")
+            .expect("line counts");
+        let hunks = repo
+            .diff_file_at_context(base, head, "long.txt", DEFAULT_CONTEXT_LINES)
+            .expect("narrow diff");
+
+        assert!(!hunks_cover_whole_file(&hunks, old_total, new_total));
+    }
+
+    #[test]
+    fn a_middle_rung_can_reach_both_ends_of_a_middling_file() {
+        // Saturation is a property of the rung on screen, not of the top of the
+        // ladder: 40 lines edited in the middle are fully covered by ±25 even
+        // though ±3 leaves plenty hidden.
+        let (_dir, repo, base, head) = repo_with_one_line_edited("file.txt", 40, 20);
+        let (old_total, new_total) = repo
+            .file_line_counts(base, head, "file.txt")
+            .expect("line counts");
+
+        let narrow = repo
+            .diff_file_at_context(base, head, "file.txt", 3)
+            .expect("narrow diff");
+        assert!(!hunks_cover_whole_file(&narrow, old_total, new_total));
+
+        let wide = repo
+            .diff_file_at_context(base, head, "file.txt", 25)
+            .expect("wide diff");
+        assert!(hunks_cover_whole_file(&wide, old_total, new_total));
+    }
+
+    #[test]
+    fn expands_paths_containing_glob_metacharacters() {
+        // libgit2 pathspecs are fnmatch globs by default, so a Next.js-style
+        // dynamic route would be read as a character class and match nothing —
+        // expansion would silently blank the file.
+        let (_dir, repo, base, head) = repo_with_one_line_edited("[id].tsx", 30, 15);
+
+        let hunks = repo
+            .diff_file_at_context(base, head, "[id].tsx", FULL_FILE_CONTEXT_LINES)
+            .expect("full diff");
+
+        assert!(has_line(&hunks, "line 1"));
+        assert!(has_line(&hunks, "CHANGED"));
     }
 
     #[test]
