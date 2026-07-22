@@ -1,18 +1,23 @@
 use crate::cli::{Args, DiffTarget};
 use crate::git::{
     build_file_tree, collect_folder_paths, collect_folder_paths_under, flatten_tree_with_state,
-    DiffData, FileTreeNode, Repository,
+    CommitInfo, DiffData, FileTreeNode, Repository,
 };
-use crate::github::{self, FileComments, PrCommit};
+use crate::github::{self, FileComments};
 use crate::highlighting::Highlighter;
-use crate::models::{DiffLineModel, FileEntryModel, PrCommitModel, TextSpanModel};
+use crate::models::{CommitModel, DiffLineModel, FileEntryModel, TextSpanModel};
 use crate::viewed_state::{self, ViewedState};
-use crate::{DiffLine, FileEntry, MainWindow, PrCommitEntry};
+use crate::{CommitEntry, DiffLine, FileEntry, MainWindow};
 use anyhow::{Context, Result};
+use git2::Oid;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+
+/// Upper bound on how many commits the sidebar lists. Keeps `lado <old-tag>`
+/// from doing a full-history walk and building thousands of UI rows.
+const COMMIT_LIST_LIMIT: usize = 200;
 
 pub struct App {
     window: MainWindow,
@@ -20,10 +25,14 @@ pub struct App {
     target: DiffTarget,
     diff_data: Rc<RefCell<Option<DiffData>>>,
     pr_comments: Rc<RefCell<Option<FileComments>>>,
-    pr_commits: Rc<RefCell<Vec<PrCommit>>>,
+    /// Commits making up the diff, oldest-first. From the GitHub API for PRs,
+    /// from a local revwalk otherwise.
+    commits: Rc<RefCell<Vec<CommitInfo>>>,
     all_pr_comments: Rc<RefCell<Vec<github::PrComment>>>,
-    pr_base_ref: Rc<RefCell<Option<String>>>,
-    pr_head_ref: Rc<RefCell<Option<String>>>,
+    /// Endpoints of the diff, resolved once at load. Stored as OIDs rather than
+    /// ref names so "All changes" can't re-resolve them to something else.
+    range_base: Rc<Cell<Option<Oid>>>,
+    range_head: Rc<Cell<Option<Oid>>>,
     highlighter: Rc<RefCell<Highlighter>>,
     /// Cached file tree for re-flattening when folders are toggled
     file_tree: Rc<RefCell<Vec<FileTreeNode>>>,
@@ -204,10 +213,10 @@ impl App {
             target,
             diff_data: Rc::new(RefCell::new(None)),
             pr_comments: Rc::new(RefCell::new(None)),
-            pr_commits: Rc::new(RefCell::new(Vec::new())),
+            commits: Rc::new(RefCell::new(Vec::new())),
             all_pr_comments: Rc::new(RefCell::new(Vec::new())),
-            pr_base_ref: Rc::new(RefCell::new(None)),
-            pr_head_ref: Rc::new(RefCell::new(None)),
+            range_base: Rc::new(Cell::new(None)),
+            range_head: Rc::new(Cell::new(None)),
             highlighter: Rc::new(RefCell::new(highlighter)),
             file_tree: Rc::new(RefCell::new(Vec::new())),
             expanded_state: Rc::new(RefCell::new(HashMap::new())),
@@ -327,30 +336,22 @@ impl App {
         // Commit selection callback for PR commit navigation
         let window_weak = self.window.as_weak();
         let repo = Rc::clone(&self.repo);
-        let pr_commits = Rc::clone(&self.pr_commits);
-        let pr_base_ref = Rc::clone(&self.pr_base_ref);
-        let pr_head_ref = Rc::clone(&self.pr_head_ref);
+        let all_commits = Rc::clone(&self.commits);
+        let range_base = Rc::clone(&self.range_base);
+        let range_head = Rc::clone(&self.range_head);
         let all_pr_comments = Rc::clone(&self.all_pr_comments);
         let highlighter = Rc::clone(&self.highlighter);
         self.window.on_commit_selected(move |idx| {
             let window = window_weak.unwrap();
-            let commits = pr_commits.borrow();
+            let commits = all_commits.borrow();
             let comments = all_pr_comments.borrow();
 
             let diff_result: Option<(Result<DiffData>, Option<FileComments>)> = if idx < 0 {
                 // "All changes" - diff base to head
-                let base_ref = pr_base_ref.borrow();
-                let head_ref = pr_head_ref.borrow();
-                if let (Some(base), Some(head)) = (base_ref.as_ref(), head_ref.as_ref()) {
-                    let base_oid = repo.resolve_ref(base).ok();
-                    let head_oid = repo.resolve_ref(head).ok();
-                    if let (Some(b), Some(h)) = (base_oid, head_oid) {
-                        // Show all comments for full diff
-                        let grouped = github::group_comments_by_file(comments.clone());
-                        Some((repo.diff_commits(b, h), Some(grouped)))
-                    } else {
-                        None
-                    }
+                if let (Some(b), Some(h)) = (range_base.get(), range_head.get()) {
+                    // Show all comments for full diff
+                    let grouped = github::group_comments_by_file(comments.clone());
+                    Some((repo.diff_commits(b, h), Some(grouped)))
                 } else {
                     None
                 }
@@ -372,23 +373,17 @@ impl App {
                         None
                     }
                 } else {
-                    // First commit in PR - no parent, show empty diff or handle differently
-                    // For now, just show the commit itself compared to base
-                    let base_ref = pr_base_ref.borrow();
-                    if let Some(base) = base_ref.as_ref() {
-                        let base_oid = repo.resolve_ref(base).ok();
-                        let commit_oid = repo.resolve_ref(&commit.sha).ok();
-                        if let (Some(b), Some(c)) = (base_oid, commit_oid) {
-                            let filtered: Vec<_> = comments
-                                .iter()
-                                .filter(|c| c.original_commit_id == commit.sha)
-                                .cloned()
-                                .collect();
-                            let grouped = github::group_comments_by_file(filtered);
-                            Some((repo.diff_commits(b, c), Some(grouped)))
-                        } else {
-                            None
-                        }
+                    // Root commit - no parent to diff against, so fall back to
+                    // comparing it with the range base.
+                    let commit_oid = repo.resolve_ref(&commit.sha).ok();
+                    if let (Some(b), Some(c)) = (range_base.get(), commit_oid) {
+                        let filtered: Vec<_> = comments
+                            .iter()
+                            .filter(|c| c.original_commit_id == commit.sha)
+                            .cloned()
+                            .collect();
+                        let grouped = github::group_comments_by_file(filtered);
+                        Some((repo.diff_commits(b, c), Some(grouped)))
                     } else {
                         None
                     }
@@ -790,6 +785,35 @@ impl App {
         Ok(())
     }
 
+    /// Publish the commit list to the UI. `total` is the size of the full range,
+    /// which exceeds `commits.len()` when the list was truncated.
+    fn set_commit_list(&self, total: usize, commits: Vec<CommitInfo>) {
+        let entries: Vec<CommitEntry> = commits.iter().map(|c| CommitModel::from(c).into()).collect();
+        self.window
+            .set_commits(ModelRc::from(Rc::new(VecModel::from(entries))));
+        self.window.set_total_commits(total as i32);
+        *self.commits.borrow_mut() = commits;
+    }
+
+    /// Populate the commit list from a local revwalk of `base..head`. A failure
+    /// here only costs commit navigation, so it warns rather than aborting the
+    /// diff the user asked for.
+    fn load_local_commits(&self, base_oid: Oid, head_oid: Oid) {
+        match self
+            .repo
+            .commits_in_range(base_oid, head_oid, COMMIT_LIST_LIMIT)
+        {
+            Ok(commits) => {
+                let total = self
+                    .repo
+                    .count_commits_ahead(base_oid, head_oid)
+                    .unwrap_or(commits.len());
+                self.set_commit_list(total, commits);
+            }
+            Err(e) => eprintln!("Warning: Could not list commits in range: {}", e),
+        }
+    }
+
     fn load_diff(&self) -> Result<()> {
         // Resolve the target to actual commits
         let (base_oid, head_oid) = match &self.target {
@@ -838,22 +862,10 @@ impl App {
                     format!("PR #{}: {}{}", pr_num, pr_info.title, stale_note).into(),
                 );
 
-                // Store refs for later commit navigation
-                *self.pr_base_ref.borrow_mut() = Some(pr_info.base_ref);
-                *self.pr_head_ref.borrow_mut() = Some(pr_info.head_ref);
-
-                // Fetch PR commits
+                // Fetch PR commits. Preferred over a local revwalk because the
+                // API's SHAs are what review comments are keyed against.
                 match github::get_pr_commits(*pr_num) {
-                    Ok(commits) => {
-                        // Convert to UI model
-                        let commit_entries: Vec<PrCommitEntry> = commits
-                            .iter()
-                            .map(|c| PrCommitModel::from(c).into())
-                            .collect();
-                        let commits_model = Rc::new(VecModel::from(commit_entries));
-                        self.window.set_commits(ModelRc::from(commits_model));
-                        *self.pr_commits.borrow_mut() = commits;
-                    }
+                    Ok(commits) => self.set_commit_list(commits.len(), commits),
                     Err(e) => {
                         eprintln!("Warning: Could not fetch PR commits: {}", e);
                     }
@@ -874,6 +886,15 @@ impl App {
                 (base, head)
             }
         };
+
+        self.range_base.set(Some(base_oid));
+        self.range_head.set(Some(head_oid));
+
+        // The PR arm already filled the list from the GitHub API; for plain refs
+        // the commits come from a local walk of base..HEAD.
+        if !matches!(self.target, DiffTarget::PullRequest(_)) {
+            self.load_local_commits(base_oid, head_oid);
+        }
 
         // Compute the diff
         let mut diff_data = self.repo.diff_commits(base_oid, head_oid)?;

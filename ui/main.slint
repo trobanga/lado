@@ -1,5 +1,5 @@
 import { ThemeColors, ThemePresets } from "theme.slint";
-import { FileEntry, DiffLine, PrCommitEntry, TextSpan } from "structs.slint";
+import { FileEntry, DiffLine, CommitEntry, TextSpan } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
@@ -8,7 +8,7 @@ import { SettingsPanel, AppSettings } from "components/settings_panel.slint";
 import { HelpOverlay } from "components/help_overlay.slint";
 
 // Re-export structs for Rust access
-export { FileEntry, DiffLine, PrCommitEntry, TextSpan, AppSettings, ThemeColors }
+export { FileEntry, DiffLine, CommitEntry, TextSpan, AppSettings, ThemeColors }
 
 export component MainWindow inherits Window {
     title: "lado";
@@ -36,7 +36,9 @@ export component MainWindow inherits Window {
     in-out property <int> total-deletions: 0;
     in-out property <[FileEntry]> files: [];
     in-out property <[DiffLine]> lines: [];
-    in-out property <[PrCommitEntry]> commits: [];
+    in-out property <[CommitEntry]> commits: [];
+    // Size of the full commit range; exceeds commits.length when truncated.
+    in-out property <int> total-commits: 0;
     in-out property <int> selected-commit-index: -1;
     in-out property <bool> settings-visible: false;
     in-out property <bool> help-visible: false;
@@ -294,6 +296,7 @@ export component MainWindow inherits Window {
                         CommitList {
                             theme: root.theme;
                             commits: root.commits;
+                            total-commits: root.total-commits;
                             selected-index: root.selected-commit-index;
                             commit-selected(idx) => {
                                 root.selected-commit-index = idx;

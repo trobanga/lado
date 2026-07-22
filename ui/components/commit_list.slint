@@ -1,16 +1,25 @@
 import { ThemeColors } from "../theme.slint";
-import { PrCommitEntry } from "../structs.slint";
+import { CommitEntry } from "../structs.slint";
 import { Icon } from "icon.slint";
 import { Typography } from "../typography.slint";
 
 export component CommitList inherits Rectangle {
     in property <ThemeColors> theme;
-    in property <[PrCommitEntry]> commits: [];
+    in property <[CommitEntry]> commits: [];
     in property <int> selected-index: -1;  // -1 = all changes
+    // Size of the full commit range. Larger than commits.length when the range
+    // was truncated, which drives the "showing N of M" hint.
+    in property <int> total-commits: 0;
 
     callback commit-selected(int);
 
     property <bool> expanded: true;
+
+    // Row height plus the 2px inter-row spacing. The scroll viewport is sized
+    // from this, so the two must stay in step.
+    property <length> row-pitch: 30px;
+    // Cap the list so a long range can't push the file tree off screen.
+    property <length> max-list-height: 240px;
 
     // Only show when there are commits
     visible: commits.length > 0;
@@ -57,7 +66,7 @@ export component CommitList inherits Rectangle {
                         border-radius: 9px;
 
                         count-text := Text {
-                            text: commits.length;
+                            text: total-commits > commits.length ? total-commits : commits.length;
                             color: theme.text-muted;
                             font-size: 11px;
                             horizontal-alignment: center;
@@ -111,44 +120,62 @@ export component CommitList inherits Rectangle {
                 }
             }
 
-            // Commit entries
-            for commit[idx] in commits: Rectangle {
-                height: 28px;
-                background: (idx == selected-index) ? theme.accent-primary :
-                    (commit-touch.has-hover ? theme.bg-hover : transparent);
-                border-radius: 4px;
+            // Commit entries. Scrolls within a capped height so the file tree
+            // below keeps its space no matter how long the range is.
+            Flickable {
+                height: min(commits.length * root.row-pitch, root.max-list-height);
+                viewport-height: commits.length * root.row-pitch;
 
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 8px;
-                    alignment: start;
+                VerticalLayout {
+                    spacing: 2px;
 
-                    // Short SHA
-                    Text {
-                        text: commit.short-sha;
-                        color: (idx == selected-index) ? theme.bg-primary : theme.accent-primary;
-                        font-size: 11px;
-                        font-family: "monospace";
-                        vertical-alignment: center;
-                    }
+                    for commit[idx] in commits: Rectangle {
+                        height: 28px;
+                        background: (idx == selected-index) ? theme.accent-primary :
+                            (commit-touch.has-hover ? theme.bg-hover : transparent);
+                        border-radius: 4px;
 
-                    // Commit summary
-                    Text {
-                        text: commit.summary;
-                        color: (idx == selected-index) ? theme.bg-primary : theme.text-secondary;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            alignment: start;
+
+                            // Short SHA
+                            Text {
+                                text: commit.short-sha;
+                                color: (idx == selected-index) ? theme.bg-primary : theme.accent-primary;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                            }
+
+                            // Commit summary
+                            Text {
+                                text: commit.summary;
+                                color: (idx == selected-index) ? theme.bg-primary : theme.text-secondary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        commit-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.commit-selected(idx);
+                            }
+                        }
                     }
                 }
+            }
 
-                commit-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.commit-selected(idx);
-                    }
-                }
+            // Truncation hint, only when the range was capped
+            if total-commits > commits.length: Text {
+                text: "showing \{commits.length} of \{total-commits}";
+                color: theme.text-muted;
+                font-size: 11px;
+                horizontal-alignment: center;
             }
         }
 

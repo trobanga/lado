@@ -1,3 +1,4 @@
+use super::commit::CommitInfo;
 use super::diff::{DiffData, DiffHunk, DiffLine, DiffLineType, FileChange, FileStatus};
 use anyhow::{anyhow, Context, Result};
 use git2::{DiffOptions, Oid, Repository as Git2Repo};
@@ -122,6 +123,33 @@ impl Repository {
         walk.hide(from)
             .context("Failed to hide 'from' on revwalk")?;
         Ok(walk.count())
+    }
+
+    /// Commits reachable from `head` but not from `base`, newest-first,
+    /// truncated to the `limit` most recent.
+    ///
+    /// Topological sorting rather than the default date sort: commit timestamps
+    /// can tie or run backwards (rebases, imports), and the list must line up
+    /// with parent/child order for per-commit diffs to make sense. Newest-first
+    /// is both the display order and what lets `limit` drop the oldest commits
+    /// rather than the ones under review.
+    pub fn commits_in_range(&self, base: Oid, head: Oid, limit: usize) -> Result<Vec<CommitInfo>> {
+        let mut walk = self.repo.revwalk().context("Failed to create revwalk")?;
+        walk.set_sorting(git2::Sort::TOPOLOGICAL)
+            .context("Failed to set revwalk sorting")?;
+        walk.push(head).context("Failed to push 'head' onto revwalk")?;
+        walk.hide(base).context("Failed to hide 'base' on revwalk")?;
+
+        let mut commits = Vec::new();
+        for oid in walk.take(limit) {
+            let oid = oid.context("Failed to walk commit range")?;
+            let commit = self
+                .repo
+                .find_commit(oid)
+                .context("Failed to find commit in range")?;
+            commits.push(CommitInfo::from_commit(&commit));
+        }
+        Ok(commits)
     }
 
     /// Compute diff between two commits
@@ -262,11 +290,114 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    /// Build a repo with a linear history of `count` commits, each touching
+    /// `file.txt`. Returns the temp dir (kept alive for the repo's lifetime),
+    /// the repo, and the commit OIDs in creation order.
+    fn linear_repo(count: usize) -> (TempDir, Repository, Vec<Oid>) {
+        let dir = TempDir::new().expect("create temp dir");
+        let git = Git2Repo::init(dir.path()).expect("git init");
+
+        let mut oids = Vec::new();
+        for i in 0..count {
+            let blob = git
+                .blob(format!("line {i}\n").as_bytes())
+                .expect("write blob");
+            let mut builder = git.treebuilder(None).expect("tree builder");
+            builder
+                .insert("file.txt", blob, git2::FileMode::Blob.into())
+                .expect("insert blob");
+            let tree_oid = builder.write().expect("write tree");
+            let tree = git.find_tree(tree_oid).expect("find tree");
+
+            let sig = git2::Signature::now("Tester", "tester@example.com").expect("signature");
+            let parents: Vec<git2::Commit> = oids
+                .last()
+                .map(|oid| git.find_commit(*oid).expect("find parent"))
+                .into_iter()
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+
+            let oid = git
+                .commit(
+                    Some("HEAD"),
+                    &sig,
+                    &sig,
+                    &format!("commit {i}"),
+                    &tree,
+                    &parent_refs,
+                )
+                .expect("commit");
+            oids.push(oid);
+        }
+
+        (dir, Repository { repo: git }, oids)
+    }
 
     #[test]
     fn test_open_current_dir() {
         // This test should pass when run from within a git repo
         let result = Repository::open_current_dir();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn commits_in_range_excludes_the_base() {
+        let (_dir, repo, oids) = linear_repo(4);
+
+        let commits = repo
+            .commits_in_range(oids[0], oids[3], 10)
+            .expect("walk range");
+
+        assert_eq!(commits.len(), 3);
+    }
+
+    #[test]
+    fn commits_in_range_is_newest_first() {
+        let (_dir, repo, oids) = linear_repo(4);
+
+        let commits = repo
+            .commits_in_range(oids[0], oids[3], 10)
+            .expect("walk range");
+
+        // The sidebar lists these top-down, and reviewers read a commit list
+        // like `git log`: the tip of the branch first.
+        let summaries: Vec<&str> = commits.iter().map(|c| c.message.trim()).collect();
+        assert_eq!(summaries, vec!["commit 3", "commit 2", "commit 1"]);
+    }
+
+    #[test]
+    fn commits_in_range_limit_keeps_the_most_recent() {
+        let (_dir, repo, oids) = linear_repo(4);
+
+        let commits = repo
+            .commits_in_range(oids[0], oids[3], 2)
+            .expect("walk range");
+
+        // Truncation drops the oldest, not the newest: when reviewing a long
+        // range the recent commits are the interesting ones.
+        let summaries: Vec<&str> = commits.iter().map(|c| c.message.trim()).collect();
+        assert_eq!(summaries, vec!["commit 3", "commit 2"]);
+    }
+
+    #[test]
+    fn commits_in_range_records_first_parent() {
+        let (_dir, repo, oids) = linear_repo(4);
+
+        let commits = repo
+            .commits_in_range(oids[0], oids[3], 10)
+            .expect("walk range");
+
+        // The parent is what each commit's own diff is computed against.
+        let parents: Vec<Option<String>> = commits.iter().map(|c| c.parent_sha.clone()).collect();
+        assert_eq!(
+            parents,
+            vec![
+                Some(oids[2].to_string()),
+                Some(oids[1].to_string()),
+                Some(oids[0].to_string()),
+            ]
+        );
     }
 }

@@ -1,3 +1,4 @@
+use crate::git::CommitInfo;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::process::Command;
@@ -36,16 +37,6 @@ pub struct PrComment {
     pub created_at: String,
     pub commit_id: String,
     pub original_commit_id: String,
-}
-
-/// A single commit in a PR
-#[derive(Debug, Clone)]
-pub struct PrCommit {
-    pub sha: String,
-    pub short_sha: String,
-    pub parent_sha: Option<String>,
-    pub message: String,
-    pub author: String,
 }
 
 /// Comments grouped by file path, then by line number
@@ -170,7 +161,7 @@ pub fn get_pr_comments(pr_number: u32) -> Result<Vec<PrComment>> {
 }
 
 /// Fetch commits for a PR using the gh CLI
-pub fn get_pr_commits(pr_number: u32) -> Result<Vec<PrCommit>> {
+pub fn get_pr_commits(pr_number: u32) -> Result<Vec<CommitInfo>> {
     let output = Command::new("gh")
         .args([
             "api",
@@ -188,6 +179,15 @@ pub fn get_pr_commits(pr_number: u32) -> Result<Vec<PrCommit>> {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).context("Failed to parse gh output")?;
 
+    parse_pr_commits(&json)
+}
+
+/// Convert the `pulls/{n}/commits` payload into `CommitInfo`s, newest-first.
+///
+/// The API lists a PR's commits oldest-first; the sidebar shows the branch tip
+/// at the top, matching `commits_in_range` so the order does not depend on
+/// whether the target was a PR or a local ref.
+fn parse_pr_commits(json: &serde_json::Value) -> Result<Vec<CommitInfo>> {
     let commits_array = json.as_array().ok_or_else(|| anyhow!("Expected array"))?;
 
     let mut commits = Vec::new();
@@ -208,7 +208,7 @@ pub fn get_pr_commits(pr_number: u32) -> Result<Vec<PrCommit>> {
             .and_then(|p| p["sha"].as_str())
             .map(|s| s.to_string());
 
-        commits.push(PrCommit {
+        commits.push(CommitInfo {
             sha,
             short_sha,
             parent_sha,
@@ -217,6 +217,7 @@ pub fn get_pr_commits(pr_number: u32) -> Result<Vec<PrCommit>> {
         });
     }
 
+    commits.reverse();
     Ok(commits)
 }
 
@@ -239,4 +240,24 @@ pub fn group_comments_by_file(comments: Vec<PrComment>) -> FileComments {
         });
     }
     grouped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pr_commits_are_newest_first() {
+        // The API returns a PR's commits oldest-first; the sidebar reads
+        // top-down like `git log`, and must match the local-walk source.
+        let json = serde_json::json!([
+            {"sha": "aaa", "commit": {"message": "first", "author": {"name": "A"}}, "parents": [{"sha": "base"}]},
+            {"sha": "bbb", "commit": {"message": "second", "author": {"name": "A"}}, "parents": [{"sha": "aaa"}]},
+        ]);
+
+        let commits = parse_pr_commits(&json).expect("parse commits");
+
+        let messages: Vec<&str> = commits.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(messages, vec!["second", "first"]);
+    }
 }
