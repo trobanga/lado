@@ -39,6 +39,17 @@ pub enum DiffLineType {
     Comment,
 }
 
+/// Which side of the diff a comment is anchored to. Owned by the git layer as
+/// the diff-domain notion of side; `github` re-exports this and maps its parsed
+/// "LEFT"/"RIGHT" onto it. `Right` (new/added code) is the common case and the
+/// default so partially-built comment data lands on the additions side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommentSide {
+    Left,
+    #[default]
+    Right,
+}
+
 /// Data for a comment line
 #[derive(Debug, Clone, Default)]
 pub struct CommentData {
@@ -46,6 +57,8 @@ pub struct CommentData {
     pub body: String,
     pub timestamp: String,
     pub is_reply: bool,
+    /// The pane this comment is anchored to; drives one-sided rendering.
+    pub side: CommentSide,
 }
 
 /// A single line in a diff

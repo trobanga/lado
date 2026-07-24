@@ -1,4 +1,4 @@
-use crate::git::{DiffLine, DiffLineType};
+use crate::git::{CommentSide, DiffLine, DiffLineType};
 use crate::models::TextSpanModel;
 use crate::DiffLine as SlintDiffLine;
 use crate::TextSpan as SlintTextSpan;
@@ -20,6 +20,9 @@ pub struct DiffLineModel {
     pub comment_body: String,
     pub comment_timestamp: String,
     pub comment_is_reply: bool,
+    /// "left" or "right" for comment rows; empty otherwise. Drives one-sided
+    /// rendering in both the side-by-side and flowing views.
+    pub comment_side: String,
 }
 
 impl From<&DiffLine> for DiffLineModel {
@@ -32,14 +35,19 @@ impl From<&DiffLine> for DiffLineModel {
             DiffLineType::Comment => "comment",
         };
 
-        let (author, body, timestamp, is_reply) = match &line.comment {
+        let (author, body, timestamp, is_reply, comment_side) = match &line.comment {
             Some(c) => (
                 c.author.clone(),
                 c.body.clone(),
                 c.timestamp.clone(),
                 c.is_reply,
+                match c.side {
+                    CommentSide::Left => "left",
+                    CommentSide::Right => "right",
+                }
+                .to_string(),
             ),
-            None => (String::new(), String::new(), String::new(), false),
+            None => (String::new(), String::new(), String::new(), false, String::new()),
         };
 
         Self {
@@ -59,6 +67,7 @@ impl From<&DiffLine> for DiffLineModel {
             comment_body: body,
             comment_timestamp: timestamp,
             comment_is_reply: is_reply,
+            comment_side,
         }
     }
 }
@@ -84,6 +93,7 @@ impl From<DiffLineModel> for SlintDiffLine {
             comment_body: model.comment_body.into(),
             comment_timestamp: model.comment_timestamp.into(),
             comment_is_reply: model.comment_is_reply,
+            comment_side: model.comment_side.into(),
         }
     }
 }
@@ -126,6 +136,7 @@ pub fn wrap_diff_line(model: DiffLineModel, wrap_column: usize) -> Vec<DiffLineM
             comment_body: String::new(),
             comment_timestamp: String::new(),
             comment_is_reply: false,
+            comment_side: String::new(),
         })
         .collect()
 }
@@ -184,7 +195,48 @@ fn chunk_spans(spans: &[TextSpanModel], n: usize) -> Vec<(String, Vec<TextSpanMo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::{CommentData, CommentSide, DiffLine as GitDiffLine, DiffLineType};
     use slint::Color;
+
+    fn comment_line(side: CommentSide) -> GitDiffLine {
+        GitDiffLine {
+            line_type: DiffLineType::Comment,
+            old_line_num: None,
+            new_line_num: None,
+            content: String::new(),
+            comment: Some(CommentData {
+                author: "alice".to_string(),
+                body: "nit".to_string(),
+                timestamp: String::new(),
+                is_reply: false,
+                side,
+            }),
+        }
+    }
+
+    #[test]
+    fn left_comment_side_becomes_left_string_in_model() {
+        let model = DiffLineModel::from(&comment_line(CommentSide::Left));
+        assert_eq!(model.comment_side, "left");
+    }
+
+    #[test]
+    fn right_comment_side_becomes_right_string_in_model() {
+        let model = DiffLineModel::from(&comment_line(CommentSide::Right));
+        assert_eq!(model.comment_side, "right");
+    }
+
+    #[test]
+    fn non_comment_line_has_empty_comment_side() {
+        let line = GitDiffLine {
+            line_type: DiffLineType::Add,
+            old_line_num: None,
+            new_line_num: Some(1),
+            content: "x".to_string(),
+            comment: None,
+        };
+        assert_eq!(DiffLineModel::from(&line).comment_side, "");
+    }
 
     fn model_with(content: &str, spans: Vec<TextSpanModel>, line_type: &str) -> DiffLineModel {
         DiffLineModel {
@@ -198,6 +250,7 @@ mod tests {
             comment_body: String::new(),
             comment_timestamp: String::new(),
             comment_is_reply: false,
+            comment_side: String::new(),
         }
     }
 

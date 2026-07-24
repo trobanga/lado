@@ -1314,6 +1314,7 @@ fn get_lines_for_file(
                             body: comment.body.clone(),
                             timestamp: format_timestamp(&comment.created_at),
                             is_reply: comment.in_reply_to_id.is_some(),
+                            side: comment.side,
                         }),
                     };
                     result.push(DiffLineModel::from(&comment_line).into());

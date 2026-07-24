@@ -2,6 +2,8 @@ mod app;
 mod cli;
 mod config;
 mod context_level;
+mod flow_map;
+mod flow_scene;
 mod git;
 mod github;
 mod highlighting;

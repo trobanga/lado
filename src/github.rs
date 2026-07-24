@@ -3,6 +3,11 @@ use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::process::Command;
 
+/// Which side of the diff a comment is on. Defined in the git layer as the
+/// diff-domain notion of side; re-exported here so `github::CommentSide` keeps
+/// resolving and PR parsing maps its "LEFT"/"RIGHT" onto the shared type.
+pub use crate::git::CommentSide;
+
 /// Represents PR branch information
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -16,12 +21,6 @@ pub struct PrInfo {
     pub head_oid: String,
 }
 
-/// Which side of the diff a comment is on
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommentSide {
-    Left,  // Old/original code (deletions)
-    Right, // New/modified code (additions)
-}
 
 /// A single PR review comment
 #[derive(Debug, Clone)]
