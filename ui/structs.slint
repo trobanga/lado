@@ -24,6 +24,19 @@ export struct CommitEntry {
     author: string,
 }
 
+// One ribbon connector for the flowing diff view, in content-space y coords.
+// Rust fills these from the FlowLayout change segments (collapsing an empty side
+// to a thin seam band); the overlay subtracts each pane's live offset to place
+// them, and derives the translucent fill from the empty flags + theme.
+export struct Ribbon {
+    left-top: length,
+    left-bottom: length,
+    right-top: length,
+    right-bottom: length,
+    left-empty: bool,   // pure insertion: no removed lines (arm crosses left pane)
+    right-empty: bool,  // pure deletion: no added lines (arm crosses right pane)
+}
+
 export struct DiffLine {
     line-type: string,      // "add", "remove", "context", "hunk", "comment"
     old-line-num: string,

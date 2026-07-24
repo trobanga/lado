@@ -18,6 +18,7 @@ pub struct Config {
     // Keybindings
     pub key_unified: String,
     pub key_side_by_side: String,
+    pub key_flowing: String,
     pub key_scroll_down: String,
     pub key_scroll_up: String,
     pub key_file_next: String,
@@ -38,6 +39,7 @@ impl Default for Config {
             panel_width: 280.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
+            key_flowing: "f".to_string(),
             key_scroll_down: "j".to_string(),
             key_scroll_up: "k".to_string(),
             key_file_next: "J".to_string(),
@@ -125,6 +127,8 @@ mod tests {
 
         assert_eq!(config.key_expand_context, "+");
         assert_eq!(config.key_collapse_context, "-");
+        // The flowing-view binding is newer still; upgraders must inherit it too.
+        assert_eq!(config.key_flowing, "f");
     }
 
     #[test]
@@ -137,6 +141,7 @@ mod tests {
             panel_width: 300.0,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
+            key_flowing: "f".to_string(),
             key_scroll_down: "j".to_string(),
             key_scroll_up: "k".to_string(),
             key_file_next: "J".to_string(),

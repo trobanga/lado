@@ -1,7 +1,7 @@
 import { ThemeColors } from "../theme.slint";
 import { DiffLine, TextSpan } from "../structs.slint";
 
-component SideBySideCommentLine inherits Rectangle {
+export component SideBySideCommentLine inherits Rectangle {
     in property <ThemeColors> theme;
     in property <DiffLine> line;
 
@@ -55,7 +55,7 @@ component SideBySideCommentLine inherits Rectangle {
     }
 }
 
-component SideLine inherits Rectangle {
+export component SideLine inherits Rectangle {
     in property <ThemeColors> theme;
     in property <string> line-num;
     in property <string> content;
@@ -156,10 +156,13 @@ component LeftLineItem inherits Rectangle {
 
     height: line.line-type == "comment" ? 80px : root.font-size * 1.7;
 
+    // Anchored-side-only: a comment renders on the pane matching its side. The
+    // opposite pane keeps the row's height (below) but draws blank filler so the
+    // two panes stay aligned.
     SideBySideCommentLine {
         theme: root.theme;
         line: root.line;
-        visible: root.line.line-type == "comment";
+        visible: root.line.line-type == "comment" && root.line.comment-side == "left";
         width: 100%;
         height: 100%;
     }
@@ -196,7 +199,7 @@ component RightLineItem inherits Rectangle {
     SideBySideCommentLine {
         theme: root.theme;
         line: root.line;
-        visible: root.line.line-type == "comment";
+        visible: root.line.line-type == "comment" && root.line.comment-side == "right";
         width: 100%;
         height: 100%;
     }

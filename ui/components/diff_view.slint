@@ -1,12 +1,14 @@
 import { ScrollView } from "std-widgets.slint";
 import { ThemeColors } from "../theme.slint";
-import { DiffLine } from "../structs.slint";
+import { DiffLine, Ribbon } from "../structs.slint";
 import { UnifiedView } from "unified.slint";
 import { SideBySideView } from "side_by_side.slint";
+import { FlowingView } from "flowing.slint";
 
 export component DiffView inherits Rectangle {
     in property <ThemeColors> theme;
-    in property <bool> side-by-side;
+    // "unified", "side-by-side", or "flowing".
+    in property <string> view-mode: "unified";
     in property <string> selected-file;
     in property <[DiffLine]> lines: [];
     in property <int> old-gutter-digits: 0;
@@ -15,6 +17,17 @@ export component DiffView inherits Rectangle {
     in-out property <length> scroll-position: 0;
     in property <length> scroll-step: 60px;
     in property <bool> viewed: false;
+    // Flowing view: rows/ribbons come from Rust; left-y/right-y are written by
+    // the remap callback and flow back down here.
+    in property <[DiffLine]> flowing-left-rows: [];
+    in property <[DiffLine]> flowing-right-rows: [];
+    in property <[Ribbon]> flowing-ribbons: [];
+    in property <length> flowing-total-virt: 0;
+    in property <length> flowing-row-height: 22px;
+    in property <length> flowing-comment-height: 80px;
+    in property <length> flowing-left-y: 0;
+    in property <length> flowing-right-y: 0;
+    callback flowing-remap(/* virtual-y */ length);
     // Selectable plain-text mode: swaps the rendered diff for a read-only,
     // monospace TextInput so text can be dragged-to-select and copied (Ctrl+C).
     // Native Slint Text isn't selectable; TextInput is.
@@ -160,7 +173,7 @@ export component DiffView inherits Rectangle {
             }
         }
 
-        if !root.select-mode && !root.side-by-side: UnifiedView {
+        if !root.select-mode && root.view-mode == "unified": UnifiedView {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
@@ -173,7 +186,7 @@ export component DiffView inherits Rectangle {
             expand-context => { root.expand-context(); }
         }
 
-        if !root.select-mode && root.side-by-side: SideBySideView {
+        if !root.select-mode && root.view-mode == "side-by-side": SideBySideView {
             vertical-stretch: 1;
             theme: root.theme;
             lines: root.lines;
@@ -183,6 +196,27 @@ export component DiffView inherits Rectangle {
             scroll-position <=> root.scroll-position;
             scroll-step: root.scroll-step;
             context-expandable: root.context-expandable;
+            expand-context => { root.expand-context(); }
+        }
+
+        if !root.select-mode && root.view-mode == "flowing": FlowingView {
+            vertical-stretch: 1;
+            theme: root.theme;
+            left-rows: root.flowing-left-rows;
+            right-rows: root.flowing-right-rows;
+            ribbons: root.flowing-ribbons;
+            old-gutter-digits: root.old-gutter-digits;
+            new-gutter-digits: root.new-gutter-digits;
+            font-size: root.font-size;
+            row-height: root.flowing-row-height;
+            comment-height: root.flowing-comment-height;
+            total-virt: root.flowing-total-virt;
+            left-y: root.flowing-left-y;
+            right-y: root.flowing-right-y;
+            scroll-position <=> root.scroll-position;
+            scroll-step: root.scroll-step;
+            context-expandable: root.context-expandable;
+            remap(v) => { root.flowing-remap(v); }
             expand-context => { root.expand-context(); }
         }
 

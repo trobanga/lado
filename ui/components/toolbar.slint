@@ -33,70 +33,83 @@ component ToolbarButton inherits Rectangle {
     }
 }
 
+// Segment of the 3-way view toggle. Active when the current mode matches `mode`.
+component ViewToggleSegment inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <string> label;
+    in property <string> mode;
+    in property <string> view-mode;
+    callback pick(string);
+
+    property <bool> active: root.view-mode == root.mode;
+
+    background: root.active ? theme.bg-hover : transparent;
+    border-radius: 3px;
+
+    Text {
+        text: root.label;
+        color: root.active ? theme.text-primary : theme.text-muted;
+        font-size: Typography.caption;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (!root.active) { root.pick(root.mode); }
+        }
+    }
+}
+
 component ViewToggle inherits Rectangle {
     in property <ThemeColors> theme;
-    in property <bool> side-by-side;
-    callback toggle;
+    in property <string> view-mode;
+    callback set-mode(string);
 
     height: 28px;
-    width: 160px;
+    width: 220px;
     background: theme.bg-tertiary;
     border-radius: 4px;
 
     HorizontalLayout {
         padding: 2px;
 
-        Rectangle {
-            background: !side-by-side ? theme.bg-hover : transparent;
-            border-radius: 3px;
-
-            Text {
-                text: "Unified";
-                color: !side-by-side ? theme.text-primary : theme.text-muted;
-                font-size: Typography.caption;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    if (side-by-side) { root.toggle(); }
-                }
-            }
+        ViewToggleSegment {
+            theme: root.theme;
+            label: "Unified";
+            mode: "unified";
+            view-mode: root.view-mode;
+            pick(m) => { root.set-mode(m); }
         }
 
-        Rectangle {
-            background: side-by-side ? theme.bg-hover : transparent;
-            border-radius: 3px;
+        ViewToggleSegment {
+            theme: root.theme;
+            label: "Side by Side";
+            mode: "side-by-side";
+            view-mode: root.view-mode;
+            pick(m) => { root.set-mode(m); }
+        }
 
-            Text {
-                text: "Side by Side";
-                color: side-by-side ? theme.text-primary : theme.text-muted;
-                font-size: Typography.caption;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    if (!side-by-side) { root.toggle(); }
-                }
-            }
+        ViewToggleSegment {
+            theme: root.theme;
+            label: "Flowing";
+            mode: "flowing";
+            view-mode: root.view-mode;
+            pick(m) => { root.set-mode(m); }
         }
     }
 }
 
 export component Toolbar inherits Rectangle {
     in property <ThemeColors> theme;
-    in property <bool> side-by-side;
+    in property <string> view-mode;
     in property <string> diff-title;
     in property <int> files-changed: 0;
     in property <int> total-additions: 0;
     in property <int> total-deletions: 0;
 
-    callback toggle-view;
+    callback set-mode(string);
     callback refresh;
     callback open-settings;
 
@@ -184,8 +197,8 @@ export component Toolbar inherits Rectangle {
 
             ViewToggle {
                 theme: root.theme;
-                side-by-side: root.side-by-side;
-                toggle => { root.toggle-view(); }
+                view-mode: root.view-mode;
+                set-mode(m) => { root.set-mode(m); }
             }
 
             ToolbarButton {

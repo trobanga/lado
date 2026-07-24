@@ -96,10 +96,6 @@ impl FlowLayout {
         // v == total_virt (or no segments): rest at the far end.
         (self.total_left, self.total_right)
     }
-
-    pub fn total_virtual_height(&self) -> f32 {
-        self.total_virt
-    }
 }
 
 #[cfg(test)]
@@ -115,7 +111,7 @@ mod tests {
         }]);
 
         assert_eq!(layout.map_scroll(50.0), (50.0, 50.0));
-        assert_eq!(layout.total_virtual_height(), 100.0);
+        assert_eq!(layout.total_virt, 100.0);
     }
 
     #[test]
@@ -127,7 +123,7 @@ mod tests {
         ]);
 
         // Virtual height of the change block is max(20,40) = 40 → total 140.
-        assert_eq!(layout.total_virtual_height(), 140.0);
+        assert_eq!(layout.total_virt, 140.0);
         // Top of the change block: both panes at the block's start.
         assert_eq!(layout.map_scroll(100.0), (100.0, 100.0));
         // Halfway through the block (t=0.5): left crept 10, right raced 20.
@@ -168,7 +164,7 @@ mod tests {
         ]);
 
         assert_eq!(layout.segments[0].kind, SegKind::Comment);
-        assert_eq!(layout.total_virtual_height(), 80.0);
+        assert_eq!(layout.total_virt, 80.0);
         // Right pane stays put while the comment scrolls past on the left.
         assert_eq!(layout.map_scroll(40.0), (40.0, 0.0));
     }

@@ -5,8 +5,11 @@ use crate::git::{
     flatten_tree_with_state, hunks_cover_whole_file, selectable_text_for_hunks, CommitInfo,
     DiffData, DiffHunk, FileTreeNode, Repository,
 };
+use crate::flow_map::{FlowLayout, SegKind};
+use crate::flow_scene::{build_scene, RowClass, SceneRow, Side};
 use crate::github::{self, FileComments};
 use crate::highlighting::Highlighter;
+use crate::Ribbon;
 use crate::models::{CommitModel, DiffLineModel, FileEntryModel, TextSpanModel};
 use crate::viewed_state::{self, ViewedState};
 use crate::{CommitEntry, DiffLine, FileEntry, MainWindow};
@@ -78,6 +81,10 @@ struct DiffRenderer {
     /// Consulted when stepping, so `+` on a file with nothing left to reveal
     /// stops rather than re-diffing its way to the same picture.
     saturated: Rc<Cell<bool>>,
+    /// Scroll-coupling layout for the file currently on screen. The flowing
+    /// view's `remap` callback is registered once but must always see the
+    /// current file, so it reads this shared cell rather than a captured value.
+    flow_layout: Rc<RefCell<FlowLayout>>,
 }
 
 /// One file's hunks at a wider context, tagged with what they were computed
@@ -200,7 +207,26 @@ impl DiffRenderer {
             wrap,
         );
 
-        window.set_lines(lines);
+        // Flowing view: split the merged rows into two panes + ribbons. Heights
+        // must match the flowing `.slint`, which is handed these same values.
+        let row_h = settings.font_size as f32 * 1.7;
+        let comment_h = 80.0;
+        let (flow_left, flow_right, ribbons, layout) =
+            build_flow_from_rows(&lines, row_h, comment_h);
+        let total_virt = layout.total_virt;
+        *self.flow_layout.borrow_mut() = layout;
+        window.set_flowing_left_rows(ModelRc::new(VecModel::from(flow_left)));
+        window.set_flowing_right_rows(ModelRc::new(VecModel::from(flow_right)));
+        window.set_flowing_ribbons(ModelRc::new(VecModel::from(ribbons)));
+        window.set_flowing_total_virt(total_virt);
+        window.set_flowing_row_height(row_h);
+        window.set_flowing_comment_height(comment_h);
+        // A fresh file starts at the top; the panes rest at offset 0 until a
+        // scroll drives remap().
+        window.set_flowing_left_y(0.0);
+        window.set_flowing_right_y(0.0);
+
+        window.set_lines(ModelRc::new(VecModel::from(lines)));
         window.set_old_gutter_digits(old_digits);
         window.set_new_gutter_digits(new_digits);
         window.set_selectable_text(selectable_text_for_hunks(&hunks).as_str().into());
@@ -372,6 +398,7 @@ impl App {
             line_wrap_column: config.line_wrap_column,
             key_unified: config.key_unified.clone().into(),
             key_side_by_side: config.key_side_by_side.clone().into(),
+            key_flowing: config.key_flowing.clone().into(),
             key_scroll_down: config.key_scroll_down.clone().into(),
             key_scroll_up: config.key_scroll_up.clone().into(),
             key_file_next: config.key_file_next.clone().into(),
@@ -419,6 +446,7 @@ impl App {
             widened: Rc::new(RefCell::new(None)),
             file_lines: Rc::new(RefCell::new(None)),
             saturated: Rc::new(Cell::new(false)),
+            flow_layout: Rc::new(RefCell::new(FlowLayout::default())),
         };
 
         let app = Self {
@@ -525,6 +553,17 @@ impl App {
         self.window.on_toggle_view_mode(move || {
             let _window = window_weak.unwrap();
             println!("Toggle view mode");
+        });
+
+        // Flowing view: map the virtual scroll axis to each pane's offset. Reads
+        // the current file's layout from the shared cell render() keeps fresh.
+        let window_weak = self.window.as_weak();
+        let flow_layout = Rc::clone(&self.renderer.flow_layout);
+        self.window.on_flowing_remap(move |virtual_y| {
+            let window = window_weak.unwrap();
+            let (left_y, right_y) = flow_layout.borrow().map_scroll(virtual_y);
+            window.set_flowing_left_y(left_y);
+            window.set_flowing_right_y(right_y);
         });
 
         let window_weak = self.window.as_weak();
@@ -665,6 +704,7 @@ impl App {
                 panel_width: window.get_left_panel_width(),
                 key_unified: settings.key_unified.to_string(),
                 key_side_by_side: settings.key_side_by_side.to_string(),
+                key_flowing: settings.key_flowing.to_string(),
                 key_scroll_down: settings.key_scroll_down.to_string(),
                 key_scroll_up: settings.key_scroll_up.to_string(),
                 key_file_next: settings.key_file_next.to_string(),
@@ -1196,7 +1236,7 @@ fn get_lines_for_file(
     file_comments: Option<&Vec<github::PrComment>>,
     highlighter: &Highlighter,
     wrap_column: usize,
-) -> (ModelRc<DiffLine>, i32, i32) {
+) -> (Vec<DiffLine>, i32, i32) {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
     use crate::models::{parse_hex_color, wrap_diff_line};
 
@@ -1323,11 +1363,82 @@ fn get_lines_for_file(
         }
     }
 
-    (
-        ModelRc::new(VecModel::from(result)),
-        old_gutter_digits,
-        new_gutter_digits,
-    )
+    (result, old_gutter_digits, new_gutter_digits)
+}
+
+/// Half-thickness of the seam an insert/delete draws across its empty pane. The
+/// full line is `2 * SEAM_HALF` logical px — sub-pixel, so it renders as a faint
+/// anti-aliased hairline (a JetBrains-style change marker); tune on-screen.
+const FLOW_SEAM_HALF: f32 = 0.125;
+
+/// Split the merged diff rows into the flowing view's two panes and the ribbons
+/// between change blocks. `row_h`/`comment_h` must match the heights the flowing
+/// `.slint` renders (it is handed the same values), so the panes and the ribbons
+/// stay locked together.
+fn build_flow_from_rows(
+    rows: &[DiffLine],
+    row_h: f32,
+    comment_h: f32,
+) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<Ribbon>, FlowLayout) {
+    let scene_rows: Vec<SceneRow> = rows
+        .iter()
+        .map(|r| {
+            let (class, height) = match r.line_type.as_str() {
+                "add" => (RowClass::Add, row_h),
+                "remove" => (RowClass::Remove, row_h),
+                "hunk" => (RowClass::Hunk, row_h),
+                "comment" => {
+                    let side = if r.comment_side.as_str() == "left" {
+                        Side::Left
+                    } else {
+                        Side::Right
+                    };
+                    (RowClass::Comment(side), comment_h)
+                }
+                // "context" and wrap-continuation rows (which keep their base
+                // add/remove/context type but here only context reaches this arm).
+                _ => (RowClass::Context, row_h),
+            };
+            SceneRow { class, height }
+        })
+        .collect();
+
+    let scene = build_scene(&scene_rows);
+    let layout = FlowLayout::build(&scene.segments);
+
+    let left: Vec<DiffLine> = scene.left_rows.iter().map(|&i| rows[i].clone()).collect();
+    let right: Vec<DiffLine> = scene.right_rows.iter().map(|&i| rows[i].clone()).collect();
+
+    // One ribbon per change block, in content-space y. An empty side collapses
+    // to a thin seam band centred on the change so the connector tapers to a
+    // hairline rather than a bare point.
+    let ribbons: Vec<Ribbon> = layout
+        .segments
+        .iter()
+        .filter(|s| s.kind == SegKind::Change)
+        .map(|s| {
+            let (left_top, left_bottom) = if s.left_h == 0.0 {
+                (s.left_start - FLOW_SEAM_HALF, s.left_start + FLOW_SEAM_HALF)
+            } else {
+                (s.left_start, s.left_start + s.left_h)
+            };
+            let (right_top, right_bottom) = if s.right_h == 0.0 {
+                (s.right_start - FLOW_SEAM_HALF, s.right_start + FLOW_SEAM_HALF)
+            } else {
+                (s.right_start, s.right_start + s.right_h)
+            };
+            Ribbon {
+                left_top,
+                left_bottom,
+                right_top,
+                right_bottom,
+                left_empty: s.left_h == 0.0,
+                right_empty: s.right_h == 0.0,
+            }
+        })
+        .collect();
+
+    (left, right, ribbons, layout)
 }
 
 /// Format a GitHub timestamp to a more readable format

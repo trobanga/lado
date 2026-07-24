@@ -1,5 +1,5 @@
 import { ThemeColors, ThemePresets } from "theme.slint";
-import { FileEntry, DiffLine, CommitEntry, TextSpan } from "structs.slint";
+import { FileEntry, DiffLine, CommitEntry, TextSpan, Ribbon } from "structs.slint";
 import { FileTree } from "components/file_tree.slint";
 import { DiffView } from "components/diff_view.slint";
 import { Toolbar } from "components/toolbar.slint";
@@ -8,7 +8,7 @@ import { SettingsPanel, AppSettings } from "components/settings_panel.slint";
 import { HelpOverlay } from "components/help_overlay.slint";
 
 // Re-export structs for Rust access
-export { FileEntry, DiffLine, CommitEntry, TextSpan, AppSettings, ThemeColors }
+export { FileEntry, DiffLine, CommitEntry, TextSpan, Ribbon, AppSettings, ThemeColors }
 
 export component MainWindow inherits Window {
     title: "lado";
@@ -27,8 +27,18 @@ export component MainWindow inherits Window {
         theme-name == "solarized-light" ? ThemePresets.solarized-light() :
         ThemePresets.dark();
 
-    in-out property <bool> side-by-side-mode: false;
+    // "unified", "side-by-side", or "flowing".
+    in-out property <string> view-mode: "unified";
     in-out property <string> selected-file: "";
+    // Flowing view state, all driven by Rust (see app.rs::render + on-flowing-remap).
+    in-out property <[DiffLine]> flowing-left-rows: [];
+    in-out property <[DiffLine]> flowing-right-rows: [];
+    in-out property <[Ribbon]> flowing-ribbons: [];
+    in-out property <length> flowing-total-virt: 0;
+    in-out property <length> flowing-row-height: 22px;
+    in-out property <length> flowing-comment-height: 80px;
+    in-out property <length> flowing-left-y: 0;
+    in-out property <length> flowing-right-y: 0;
     in-out property <string> diff-title: "No diff loaded";
     // Overall diff summary shown in the toolbar.
     in-out property <int> files-changed: 0;
@@ -58,6 +68,7 @@ export component MainWindow inherits Window {
         line-wrap-column: 100,
         key-unified: "u",
         key-side-by-side: "s",
+        key-flowing: "f",
         key-scroll-down: "j",
         key-scroll-up: "k",
         key-file-next: "J",
@@ -83,6 +94,8 @@ export component MainWindow inherits Window {
     callback file-selected(string);
     callback folder-toggled(string);
     callback toggle-view-mode();
+    // Flowing view: Rust maps the virtual scroll axis to each pane's offset.
+    callback flowing-remap(/* virtual-y */ length);
     callback refresh-diff();
     callback commit-selected(int);
     callback settings-changed(AppSettings);
@@ -223,12 +236,16 @@ export component MainWindow inherits Window {
                 return accept;
             }
             // Use configurable keybindings for view switching
-            if (event.text == root.app-settings.key-unified && root.side-by-side-mode) {
-                root.side-by-side-mode = false;
+            if (event.text == root.app-settings.key-unified) {
+                root.view-mode = "unified";
                 return accept;
             }
-            if (event.text == root.app-settings.key-side-by-side && !root.side-by-side-mode) {
-                root.side-by-side-mode = true;
+            if (event.text == root.app-settings.key-side-by-side) {
+                root.view-mode = "side-by-side";
+                return accept;
+            }
+            if (event.text == root.app-settings.key-flowing) {
+                root.view-mode = "flowing";
                 return accept;
             }
 
@@ -280,13 +297,13 @@ export component MainWindow inherits Window {
             // Toolbar
             Toolbar {
                 theme: root.theme;
-                side-by-side: root.side-by-side-mode;
+                view-mode: root.view-mode;
                 diff-title: root.diff-title;
                 files-changed: root.files-changed;
                 total-additions: root.total-additions;
                 total-deletions: root.total-deletions;
-                toggle-view => {
-                    root.side-by-side-mode = !root.side-by-side-mode;
+                set-mode(m) => {
+                    root.view-mode = m;
                     root.toggle-view-mode();
                 }
                 refresh => {
@@ -355,7 +372,7 @@ export component MainWindow inherits Window {
                     width: parent.width - root.left-panel-width;
                     height: parent.height;
                     theme: root.theme;
-                    side-by-side: root.side-by-side-mode;
+                    view-mode: root.view-mode;
                     selected-file: root.selected-file;
                     lines: root.lines;
                     old-gutter-digits: root.old-gutter-digits;
@@ -367,6 +384,18 @@ export component MainWindow inherits Window {
                     selectable-text: root.selectable-text;
                     context-level-label: root.context-level-label;
                     context-expandable: root.context-expandable;
+                    // Flowing view pass-through.
+                    flowing-left-rows: root.flowing-left-rows;
+                    flowing-right-rows: root.flowing-right-rows;
+                    flowing-ribbons: root.flowing-ribbons;
+                    flowing-total-virt: root.flowing-total-virt;
+                    flowing-row-height: root.flowing-row-height;
+                    flowing-comment-height: root.flowing-comment-height;
+                    flowing-left-y: root.flowing-left-y;
+                    flowing-right-y: root.flowing-right-y;
+                    flowing-remap(v) => {
+                        root.flowing-remap(v);
+                    }
                     toggle-viewed => {
                         root.toggle-selected-viewed();
                     }

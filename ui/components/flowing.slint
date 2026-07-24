@@ -1,0 +1,252 @@
+// Flowing (JetBrains-style) side-by-side diff view.
+//
+// The two panes render continuously with NO blank filler rows, so they sit at
+// decoupled vertical offsets driven by one virtual axis (see src/flow_map.rs).
+// A full-width overlay draws ribbon connectors between change blocks; for a pure
+// insert/delete the empty side continues as a thin seam across its pane. Fill
+// only ever lands on the center gutter or an empty pane, never over code text.
+//
+// Rust owns all geometry: it maps `scroll-position` (the virtual axis) to each
+// pane's `left-y`/`right-y` via the `remap` callback, and sizes rows with the
+// `row-height`/`comment-height` it also uses for the layout math — so the panes
+// and ribbons cannot drift apart.
+
+import { ThemeColors } from "../theme.slint";
+import { DiffLine, Ribbon } from "../structs.slint";
+import { SideLine, SideBySideCommentLine } from "side_by_side.slint";
+
+// One rendered row on a pane: a code line (reusing SideLine) or a comment card.
+// Height comes from the shared row-height/comment-height constants so it matches
+// the FlowLayout the ribbons are positioned against.
+component FlowLineItem inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <DiffLine> line;
+    in property <length> font-size;
+    in property <length> gutter-width;
+    in property <length> row-height;
+    in property <length> comment-height;
+    in property <bool> use-old-linenum;
+    in property <bool> context-expandable: true;
+    callback expand-context();
+
+    height: line.line-type == "comment" ? comment-height : row-height;
+
+    // The adapter routes only this pane's rows here, so any comment is already
+    // anchored to this side — no side check needed.
+    SideBySideCommentLine {
+        theme: root.theme;
+        line: root.line;
+        visible: root.line.line-type == "comment";
+        width: 100%;
+        height: 100%;
+    }
+
+    SideLine {
+        theme: root.theme;
+        visible: root.line.line-type != "comment";
+        line-num: root.use-old-linenum ? root.line.old-line-num : root.line.new-line-num;
+        content: root.line.content;
+        line-type: root.line.line-type == "hunk" ? "context" : root.line.line-type;
+        spans: root.line.spans;
+        is-continuation: root.line.is-continuation;
+        font-size: root.font-size;
+        gutter-width: root.gutter-width;
+        width: 100%;
+        height: 100%;
+    }
+
+    // Hunk expander, mirrored from the side-by-side view: hunk rows are shared
+    // between panes, so only the new (right) side shows the affordance.
+    if root.line.line-type == "hunk" && !root.use-old-linenum && root.context-expandable: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: hunk-touch.has-hover ? theme.accent-primary.with-alpha(0.12) : transparent;
+
+        Text {
+            x: parent.width - self.width - 12px;
+            text: "+ more context";
+            color: hunk-touch.has-hover ? theme.accent-primary : theme.text-muted;
+            font-size: 11px;
+            vertical-alignment: center;
+            height: 100%;
+        }
+
+        hunk-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.expand-context(); }
+        }
+    }
+}
+
+// One clipped pane. Its content is offset by `-offset` so scrolling never moves
+// the pane itself, only the rows inside it.
+component FlowPane inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <[DiffLine]> rows;
+    in property <length> offset;
+    in property <length> font-size;
+    in property <length> gutter-width;
+    in property <length> row-height;
+    in property <length> comment-height;
+    in property <bool> use-old-linenum;
+    in property <bool> context-expandable: true;
+    callback expand-context();
+
+    clip: true;
+    background: theme.bg-primary;
+
+    VerticalLayout {
+        y: -root.offset;
+        alignment: start;
+        for line in root.rows: FlowLineItem {
+            theme: root.theme;
+            line: line;
+            font-size: root.font-size;
+            gutter-width: root.gutter-width;
+            row-height: root.row-height;
+            comment-height: root.comment-height;
+            use-old-linenum: root.use-old-linenum;
+            context-expandable: root.context-expandable;
+            expand-context => { root.expand-context(); }
+            width: parent.width;
+        }
+    }
+}
+
+export component FlowingView inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <[DiffLine]> left-rows;
+    in property <[DiffLine]> right-rows;
+    in property <[Ribbon]> ribbons;
+    in property <int> old-gutter-digits: 0;
+    in property <int> new-gutter-digits: 0;
+    in property <length> font-size: 13px;
+    // Shared with the layout math in Rust; see the header note.
+    in property <length> row-height: 22px;
+    in property <length> comment-height: 80px;
+    in property <length> total-virt: 0;
+    in property <length> gutter-w: 56px;
+    in-out property <length> scroll-position: 0;
+    in property <length> scroll-step: 60px;
+    in property <bool> context-expandable: true;
+    // Written by remap() (Rust) from scroll-position; never bound directly.
+    in-out property <length> left-y: 0;
+    in-out property <length> right-y: 0;
+    // Rust maps the virtual-y argument to left-y/right-y.
+    callback remap(/* virtual-y */ length);
+    callback expand-context();
+
+    // Switching into this view (or its first show) must place the panes for the
+    // current scroll-position; `changed` only fires on later changes.
+    init => { root.remap(root.scroll-position); }
+
+    // Content-sized line-number gutters, matching the side-by-side view.
+    property <length> old-gutter-px: root.old-gutter-digits <= 0 ? 0px : root.old-gutter-digits * 9px + 8px;
+    property <length> new-gutter-px: root.new-gutter-digits <= 0 ? 0px : root.new-gutter-digits * 9px + 8px;
+    property <length> max-scroll: max(0px, root.total-virt - self.height);
+
+    background: theme.bg-primary;
+
+    // Keyboard nav and the wheel below both change scroll-position; a single
+    // change handler re-maps the panes so there is one path, not two.
+    changed scroll-position => { root.remap(root.scroll-position); }
+
+    // A single wheel driver: two coupled Flickables would fight, so the panes are
+    // plain clipped Rectangles and this wrapping TouchArea owns the scroll. Child
+    // TouchAreas (the hunk expander) still get clicks; scroll bubbles up to here.
+    TouchArea {
+        scroll-event(e) => {
+            root.scroll-position = clamp(root.scroll-position - e.delta-y, 0px, root.max-scroll);
+            accept
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+
+            FlowPane {
+                theme: root.theme;
+                rows: root.left-rows;
+                offset: root.left-y;
+                font-size: root.font-size;
+                gutter-width: root.old-gutter-px;
+                row-height: root.row-height;
+                comment-height: root.comment-height;
+                use-old-linenum: true;
+                horizontal-stretch: 1;
+            }
+
+            // Center gutter: the channel the ribbons pass through.
+            Rectangle {
+                width: root.gutter-w;
+                background: theme.bg-secondary;
+            }
+
+            FlowPane {
+                theme: root.theme;
+                rows: root.right-rows;
+                offset: root.right-y;
+                font-size: root.font-size;
+                gutter-width: root.new-gutter-px;
+                row-height: root.row-height;
+                comment-height: root.comment-height;
+                use-old-linenum: false;
+                context-expandable: root.context-expandable;
+                expand-context => { root.expand-context(); }
+                horizontal-stretch: 1;
+            }
+        }
+
+        // Full-width ribbon overlay above panes + gutter. Plain Paths (no
+        // TouchArea) don't intercept pointer events, so the expander beneath
+        // still clicks and scroll still bubbles. Translucent fill only, no
+        // stroke (per the approved design).
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            clip: true;
+
+            for rb in root.ribbons: pe := Path {
+                // Pane / gutter x boundaries; an empty side extends its arm out.
+                property <length> lpw: (root.width - root.gutter-w) / 2;
+                property <length> gl: self.lpw;
+                property <length> gr: self.lpw + root.gutter-w;
+                property <length> mid: (self.gl + self.gr) / 2;
+                property <length> le: rb.left-empty ? 0px : self.gl;
+                property <length> re: rb.right-empty ? root.width : self.gr;
+                // Screen-space y of each side's band (content minus live offset).
+                property <length> lt: rb.left-top - root.left-y;
+                property <length> lb: rb.left-bottom - root.left-y;
+                property <length> rt: rb.right-top - root.right-y;
+                property <length> rbo: rb.right-bottom - root.right-y;
+
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: root.width / 1px;
+                viewbox-height: root.height / 1px;
+                clip: true;
+                fill: (rb.left-empty
+                        ? theme.status-added
+                        : rb.right-empty ? theme.status-deleted : theme.accent-primary)
+                    .with-alpha(0.22);
+
+                MoveTo { x: pe.le / 1px; y: pe.lt / 1px; }
+                LineTo { x: pe.gl / 1px; y: pe.lt / 1px; }
+                CubicTo {
+                    control-1-x: pe.mid / 1px; control-1-y: pe.lt / 1px;
+                    control-2-x: pe.mid / 1px; control-2-y: pe.rt / 1px;
+                    x: pe.gr / 1px; y: pe.rt / 1px;
+                }
+                LineTo { x: pe.re / 1px; y: pe.rt / 1px; }
+                LineTo { x: pe.re / 1px; y: pe.rbo / 1px; }
+                LineTo { x: pe.gr / 1px; y: pe.rbo / 1px; }
+                CubicTo {
+                    control-1-x: pe.mid / 1px; control-1-y: pe.rbo / 1px;
+                    control-2-x: pe.mid / 1px; control-2-y: pe.lb / 1px;
+                    x: pe.gl / 1px; y: pe.lb / 1px;
+                }
+                LineTo { x: pe.le / 1px; y: pe.lb / 1px; }
+                Close { }
+            }
+        }
+    }
+}

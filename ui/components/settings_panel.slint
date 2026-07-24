@@ -9,6 +9,7 @@ export struct AppSettings {
     // Keybindings
     key-unified: string,      // default: "u"
     key-side-by-side: string, // default: "s"
+    key-flowing: string,      // default: "f"
     key-scroll-down: string,  // default: "j"
     key-scroll-up: string,    // default: "k"
     key-file-next: string,    // default: "J"
@@ -483,6 +484,7 @@ export component SettingsPanel inherits Rectangle {
         line-wrap-column: 100,
         key-unified: "u",
         key-side-by-side: "s",
+        key-flowing: "f",
         key-scroll-down: "j",
         key-scroll-up: "k",
         key-file-next: "J",
@@ -733,6 +735,16 @@ export component SettingsPanel inherits Rectangle {
                         value: root.settings.key-side-by-side;
                         changed(val) => {
                             root.settings.key-side-by-side = val;
+                            root.settings-changed(root.settings);
+                        }
+                    }
+
+                    KeybindCapture {
+                        theme: root.theme;
+                        label: "Flowing View";
+                        value: root.settings.key-flowing;
+                        changed(val) => {
+                            root.settings.key-flowing = val;
                             root.settings-changed(root.settings);
                         }
                     }
