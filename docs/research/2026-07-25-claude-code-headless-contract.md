@@ -256,11 +256,27 @@ use shows dispatch never occurred — but a purpose-built probe would make it ai
 - `--permission-mode dontAsk` completed without hanging, in a repo, non-interactively.
 - `permission_denials` is a structured array on the result object.
 
+**Verified — the negative finding (2026-07-27, `diff-93a.13`)**
+
+- **`--allowedTools "Bash(git *)"` does NOT confine `Bash` to git.** Probed twice — once with
+  `--permission-mode dontAsk`, once with the default mode — asking the agent to run
+  `echo pwned > <path>`. Both times the command **executed**, the file was **created**, and
+  `permission_denials` was **empty**. Do not treat the tool allowlist as a sandbox.
+- **What did stop a write was the filesystem sandbox, not the allowlist.** The same command
+  targeting `/home/trobanga/…` failed with `(eval):1: read-only file system`. So containment is
+  a property of the *process sandbox*, and lado must supply it rather than assume `--allowedTools`
+  provides it. (Whether that sandbox was a Claude Code default or inherited from this machine's
+  settings is **not** established — see §11, environment caveat.)
+- `--permission-mode dontAsk` does deny *some* calls: a compound
+  `echo … ; echo "exit_status=$?"` was recorded in `permission_denials`. The gate is real but it
+  is not the allowlist, and its rules were not characterised.
+
 **Help only**
 
 - `--permission-mode` choices: `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`,
   `plan`.
 - `--allowedTools` / `--disallowedTools` accept names with glob patterns, e.g. `"Bash(git *)"`.
+  _(The pattern is accepted; §"the negative finding" above shows it is not enforced for `Bash`.)_
 - `--add-dir` grants tool access to additional directories.
 - `--dangerously-skip-permissions` bypasses all checks; `--allow-dangerously-skip-permissions`
   merely makes it available.
@@ -279,8 +295,9 @@ use shows dispatch never occurred — but a purpose-built probe would make it ai
    this machine is authenticated and under quota.
 5. ~~**Whether the `Write` tool is scoped by `--add-dir`,** or needs separate sandbox config.~~
    **Moot as of `diff-93a.6`** — the graph returns on stdout and lado writes the artifact folder,
-   so the agent is given no `Write` tool at all. Still open in a weaker form for `diff-93a.13`:
-   whether `Bash` can be scoped to git, since `Bash` can write regardless.
+   so the agent is given no `Write` tool at all. ~~Still open in a weaker form for `diff-93a.13`:
+   whether `Bash` can be scoped to git.~~ **Answered 2026-07-27 — see §9, "the negative finding":
+   `Bash` CANNOT be scoped by `--allowedTools`.** Containment must come from the process sandbox.
 6. **Whether `--plugin-dir` makes a skill invocable,** and how it would be addressed given §8.
 7. **Settings precedence** across CLI flags, local, project, user.
 8. **Prompt size limits** on stdin.
@@ -290,6 +307,80 @@ use shows dispatch never occurred — but a purpose-built probe would make it ai
    an otherwise-successful run.
 10. **`--max-budget-usd` overshoot magnitude** on a long run. Observed 3.3× on a trivial one;
     unknown whether the absolute overshoot stays bounded by context size.
+
+---
+
+## 11. Trimming a spawned run — measured (`diff-93a.13`, 2026-07-27)
+
+§7 named four design levers without measuring any of them. This section measures them.
+
+**Metric.** `opus context = inputTokens + cacheCreationInputTokens + cacheReadInputTokens`.
+**Compare token columns, not dollars.** Cost swings ~9× on cache warmth alone for a byte-identical
+configuration (`p1` $0.0648 vs `p1b` $0.0105, both exactly 19,728 tokens). Reproducibility is
+otherwise excellent: those two runs agreed to the token.
+
+All probes: trivial prompt `Reply with exactly: OK`, `--output-format json
+--no-session-persistence --permission-mode dontAsk`, cwd `/home/trobanga/code/lado`, one turn
+unless noted.
+
+| # | Configuration | opus ctx | Δ |
+|---|---|---:|---|
+| p0 | *(no flags — full ambient inherit)* | **29,709** | baseline |
+| p4 | `--safe-mode` | 21,582 | −27% |
+| p1 | `--setting-sources ''` | 19,728 | −34% |
+| p2 | `--safe-mode --setting-sources ''` | 19,003 | −36% |
+| p5 | p2 `+ --tools "Read,Bash,Glob,Grep"` | **9,071** | **−69%** |
+| p6 | p5 `+ --exclude-dynamic-system-prompt-sections` | 9,008 | −70% |
+| p7 | p5 `+ --system-prompt '<short>'` | **5,969** | **−80%** |
+| p8 | p7 `+ --tools "Read,Bash" + --json-schema` (3 turns) | 4,580 | −85% |
+| c4a | `--safe-mode --tools ""` *(no tools at all)* | 3,195 | irreducible base |
+| c4b | `--tools ""` *(ambient, no tools)* | 16,965 | — |
+
+**Findings**
+
+1. **`--tools` is the dominant lever, and it is not `--allowedTools`.** `--tools` selects which
+   built-in tool *definitions* are sent; `--allowedTools` is a permission filter that ships every
+   schema regardless. Trimming the tool set cut ~9,900 tokens (p2→p5), more than stripping
+   settings, MCP and `CLAUDE.md` put together (~10,700 from a 29,709 base, but see 2).
+2. **`--safe-mode` works on subscription auth — unlike `--bare`.** Every `--safe-mode` probe
+   returned `is_error: false`, `rc=0`. This retires §6's problem: the context-stripping `--bare`
+   was designed for is available after all, under a different flag and with no auth penalty.
+3. **`--safe-mode` verifiably blocks `CLAUDE.md`.** c4a vs c4b is the clean experiment — same
+   prompt, no tools, asking the model to name the project *without reading anything*. Ambient
+   (c4b) answered "**lado** … **Slint**" and volunteered that it came from `CLAUDE.md`;
+   `--safe-mode` (c4a) answered "NOT PROVIDED". The ambient tax at zero tools is
+   16,965 − 3,195 = **13,770 tokens of pure inherited config**.
+4. **`--system-prompt` saves a further ~3,100 tokens** (p5→p7) — but costs the default prompt's
+   tool-use guidance, which was **not** measured. Capability risk is real and unquantified;
+   `--append-system-prompt` is the conservative fallback that forfeits the saving.
+5. **`--exclude-dynamic-system-prompt-sections` is a red herring for lado.** It barely changes
+   size (−63 tokens) — its purpose is shifting context from cache-*creation* to cache-*read*. But
+   help states it is **"ignored with `--system-prompt`"**, so choosing finding 4 makes it moot.
+   No loss: a custom system prompt is static by construction, which is the cache reuse the flag
+   was reaching for. *Not isolated:* p6's favourable create/read split may simply be p5's warm
+   cache, since the two share a prefix.
+6. **A second model is billed on every trimmed run.** Once settings are stripped, each run adds a
+   `claude-haiku-4-5` call of ~521 in / ~15 out (~$0.0006). Absent from p0. Unexplained,
+   negligible, but present in `modelUsage` — lado should sum across models, not read the first.
+
+**Bottom line for `diff-93a.9`.** The floor recorded on the map — **$0.195 / 19,305 tokens** — was
+measured with `--setting-sources ''` alone, and this section reproduces it (p1: 19,728). It is
+**not** the floor. The recommended invocation reaches **~4,600 tokens**, a **76% cut**, before any
+real work. Recommended shape:
+
+```
+claude -p --safe-mode --setting-sources '' --strict-mcp-config --disable-slash-commands \
+  --tools "Read,Bash" --system-prompt '<lado's own>' --json-schema '<graph schema>' \
+  --output-format json --no-session-persistence --permission-mode dontAsk
+```
+
+**Environment caveat — this bounds every figure above.** All probes were spawned from *inside* a
+Claude Code session, which exports 13 `CLAUDE_*` variables to any child, including
+**`CLAUDE_CONFIG_DIR`** (redirects the whole config directory), `CLAUDE_EFFORT`,
+`CLAUDE_CODE_ENTRYPOINT` and HTTP/SOCKS proxy ports. lado spawns from a desktop process with a
+clean environment, so its numbers will differ. **Consequence: lado must spawn with an explicitly
+scrubbed environment**, or a stray `CLAUDE_CONFIG_DIR` in the user's shell silently changes which
+config a run loads — a failure that would present as an inexplicable cost or behaviour change.
 
 ---
 
@@ -305,4 +396,14 @@ use shows dispatch never occurred — but a purpose-built probe would make it ai
 5. `--output-format json --json-schema '{...}' --setting-sources ''` (2026-07-26, for
    `diff-93a.6`) → `structured_output` shape, `stop_reason: "tool_use"`, cost floor.
 
+6. **(2026-07-27, for `diff-93a.13`)** Eleven further live runs — the §11 configuration matrix
+   (p0–p8, c4a, c4b) plus three capability probes (c1–c3) that attempted a non-git `Bash` write
+   under `--allowedTools "Bash(git *)"`. Harness and raw JSON were scratch, not committed; every
+   number in §11 is reproduced in its table.
+
 All used `--no-session-persistence --permission-mode dontAsk` and an external `timeout`.
+
+_One probe was invalidated and re-run: the first `Bash`-scoping attempt failed with
+`EROFS … mkdir '~/.claude/session-env/…'`, which was the **parent** session's sandbox blocking the
+child's tool setup — not a property of the flags. Re-run unsandboxed. Noted because it is an easy
+false negative to record as "Bash was blocked"._
