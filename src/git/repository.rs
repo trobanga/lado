@@ -33,6 +33,12 @@ impl Repository {
         Ok(Self { repo })
     }
 
+    /// Path of the git directory. The file watcher observes this tree: every
+    /// change that can move the diff's endpoints lands somewhere under it.
+    pub fn git_dir(&self) -> &Path {
+        self.repo.path()
+    }
+
     /// Find the default branch (main or master)
     pub fn find_default_branch(&self) -> Result<String> {
         // Try common default branch names

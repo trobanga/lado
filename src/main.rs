@@ -10,6 +10,7 @@ mod highlighting;
 mod models;
 mod ui;
 mod viewed_state;
+mod watcher;
 
 use anyhow::Result;
 use clap::Parser;

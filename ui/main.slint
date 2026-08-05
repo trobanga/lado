@@ -97,6 +97,9 @@ export component MainWindow inherits Window {
     // Flowing view: Rust maps the virtual scroll axis to each pane's offset.
     callback flowing-remap(/* virtual-y */ length);
     callback refresh-diff();
+    // Raised by Rust, not by the UI. The file watcher runs on its own thread
+    // and cannot reach the app state, so it wakes the event loop through here.
+    callback watch-triggered();
     callback commit-selected(int);
     callback settings-changed(AppSettings);
     callback toggle-fullscreen();
@@ -133,6 +136,12 @@ export component MainWindow inherits Window {
             // F11 toggles fullscreen (works even with settings open)
             if (event.text == Key.F11) {
                 root.toggle-fullscreen();
+                return accept;
+            }
+
+            // F5 reloads the diff (works even with settings open)
+            if (event.text == Key.F5) {
+                root.refresh-diff();
                 return accept;
             }
 

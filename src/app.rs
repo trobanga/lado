@@ -12,6 +12,7 @@ use crate::highlighting::Highlighter;
 use crate::Ribbon;
 use crate::models::{CommitModel, DiffLineModel, FileEntryModel, TextSpanModel};
 use crate::viewed_state::{self, ViewedState};
+use crate::watcher::DiffWatcher;
 use crate::{CommitEntry, DiffLine, FileEntry, MainWindow};
 use anyhow::{Context, Result};
 use git2::Oid;
@@ -49,6 +50,14 @@ pub struct App {
     target_key: String,
     /// Single owner of "put this file's diff on screen"
     renderer: DiffRenderer,
+    /// Base and head ref *names* of the last pull request load. The watcher
+    /// resolves these locally, so checking whether a PR diff moved costs no
+    /// call to `gh`.
+    pr_refs: RefCell<Option<(String, String)>>,
+    /// Alive for as long as the window is. Dropping it stops the watching.
+    watcher: RefCell<Option<DiffWatcher>>,
+    /// Guards against a reload starting inside a reload.
+    reloading: Cell<bool>,
 }
 
 /// Puts one file's diff on screen.
@@ -365,6 +374,14 @@ fn find_initial_focus_index(entries: &[FileEntry]) -> i32 {
         .unwrap_or(-1)
 }
 
+/// Pick the row to focus after building the file list. `keep` is the file that
+/// was on screen before a reload.
+fn pick_focus_index(entries: &[FileEntry], keep: Option<&str>) -> i32 {
+    keep.and_then(|path| entries.iter().position(|e| e.path == path))
+        .map(|i| i as i32)
+        .unwrap_or_else(|| find_initial_focus_index(entries))
+}
+
 /// Look up the viewed status of a file by path, independent of the file tree
 /// model. Used to keep the diff header's checkbox correct even when the file
 /// is hidden by a collapsed ancestor.
@@ -384,7 +401,7 @@ fn is_path_viewed(
 }
 
 impl App {
-    pub fn new(args: Args) -> Result<Self> {
+    pub fn new(args: Args) -> Result<Rc<Self>> {
         let window = MainWindow::new().context("Failed to create window")?;
         let repo = Rc::new(Repository::open_current_dir()?);
         let target = DiffTarget::parse(args.target.as_deref());
@@ -449,7 +466,7 @@ impl App {
             flow_layout: Rc::new(RefCell::new(FlowLayout::default())),
         };
 
-        let app = Self {
+        let app = Rc::new(Self {
             window,
             repo,
             target,
@@ -465,15 +482,39 @@ impl App {
             viewed_state,
             target_key,
             renderer,
-        };
+            pr_refs: RefCell::new(None),
+            watcher: RefCell::new(None),
+            reloading: Cell::new(false),
+        });
 
         app.setup_callbacks()?;
         app.load_diff()?;
+        if config.auto_reload {
+            app.start_watching();
+        }
 
         Ok(app)
     }
 
-    fn setup_callbacks(&self) -> Result<()> {
+    /// Reload the diff by itself when the repository changes.
+    ///
+    /// The watching thread must not touch `repo`: `git2::Repository` is not
+    /// `Send`. It only wakes the event loop, which raises `watch-triggered` and
+    /// puts the work back on this thread.
+    fn start_watching(self: &Rc<Self>) {
+        let window_weak = self.window.as_weak();
+        let result = DiffWatcher::spawn(self.repo.git_dir(), move || {
+            let _ = window_weak.upgrade_in_event_loop(|w| w.invoke_watch_triggered());
+        });
+        match result {
+            Ok(watcher) => *self.watcher.borrow_mut() = Some(watcher),
+            // Losing the watcher costs the automatic reload, not the diff. F5
+            // still works, so warn and carry on.
+            Err(e) => eprintln!("Warning: automatic reload is off: {}", e),
+        }
+    }
+
+    fn setup_callbacks(self: &Rc<Self>) -> Result<()> {
         let window_weak = self.window.as_weak();
         let diff_data = Rc::clone(&self.diff_data);
         let renderer = self.renderer.clone();
@@ -573,10 +614,28 @@ impl App {
             window.window().set_fullscreen(!is_fullscreen);
         });
 
-        let window_weak = self.window.as_weak();
+        // F5 and the toolbar button. Does the full load, so for a pull request
+        // it re-fetches from origin — this is how a change on the remote
+        // reaches the screen.
+        let app_weak = Rc::downgrade(self);
         self.window.on_refresh_diff(move || {
-            let _window = window_weak.unwrap();
-            println!("Refresh diff");
+            if let Some(app) = app_weak.upgrade() {
+                app.refresh();
+            }
+        });
+
+        // The watcher saw the git directory change. Reload only if the commits
+        // the view is built from actually moved: the directory also churns for
+        // reasons no diff depends on, and a refresh of a pull request writes
+        // into it itself.
+        let app_weak = Rc::downgrade(self);
+        self.window.on_watch_triggered(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if app.range_moved() {
+                app.refresh();
+            }
         });
 
         // Commit selection callback for PR commit navigation
@@ -713,6 +772,9 @@ impl App {
                 key_next_commit: settings.key_next_commit.to_string(),
                 key_expand_context: settings.key_expand_context.to_string(),
                 key_collapse_context: settings.key_collapse_context.to_string(),
+                // Carry over every key the settings panel does not show. Without
+                // this, saving the panel resets them to their defaults.
+                ..crate::config::load()
             };
             if let Err(e) = crate::config::save(&config) {
                 eprintln!("Warning: Could not save settings: {}", e);
@@ -1067,7 +1129,63 @@ impl App {
         }
     }
 
+    /// Rebuild the whole view from the repository, keeping the file that is on
+    /// screen. A failure leaves the old view up: during a rebase `HEAD` points
+    /// at nothing for a moment, and losing the diff over that would be worse
+    /// than showing a stale one.
+    fn refresh(&self) {
+        if self.reloading.get() {
+            return;
+        }
+        self.reloading.set(true);
+        let keep = self.window.get_selected_file().to_string();
+        let keep = (!keep.is_empty()).then_some(keep);
+        if let Err(e) = self.load_diff_keeping(keep) {
+            eprintln!("Warning: Could not reload the diff: {}", e);
+        }
+        self.reloading.set(false);
+    }
+
+    /// Whether the commit pair the view is built from has moved. Resolves the
+    /// refs locally — no network, so the watcher can ask this on every event.
+    fn range_moved(&self) -> bool {
+        let resolved = match &self.target {
+            DiffTarget::DefaultBranch => self
+                .repo
+                .find_default_branch()
+                .and_then(|b| self.repo.resolve_ref(&b))
+                .and_then(|base| Ok((base, self.repo.head_commit()?))),
+            DiffTarget::Ref(name) => self
+                .repo
+                .resolve_ref(name)
+                .and_then(|base| Ok((base, self.repo.head_commit()?))),
+            DiffTarget::PullRequest(_) => {
+                let refs = self.pr_refs.borrow();
+                let Some((base_ref, head_ref)) = refs.as_ref() else {
+                    return false;
+                };
+                self.repo
+                    .resolve_ref(&format!("origin/{}", base_ref))
+                    .or_else(|_| self.repo.resolve_ref(base_ref))
+                    .and_then(|base| Ok((base, self.repo.resolve_ref(head_ref)?)))
+            }
+        };
+
+        // A ref that will not resolve means the repository is mid-operation.
+        // Wait for the next event rather than reloading into a broken state.
+        let Ok((base, head)) = resolved else {
+            return false;
+        };
+        (Some(base), Some(head)) != (self.range_base.get(), self.range_head.get())
+    }
+
     fn load_diff(&self) -> Result<()> {
+        self.load_diff_keeping(None)
+    }
+
+    /// Build the whole view from the repository. `keep` names the file to put
+    /// back on screen; without it the view opens on the first unviewed file.
+    fn load_diff_keeping(&self, keep: Option<String>) -> Result<()> {
         // Resolve the target to actual commits
         let (base_oid, head_oid) = match &self.target {
             DiffTarget::DefaultBranch => {
@@ -1099,6 +1217,11 @@ impl App {
                     .resolve_ref(&origin_base_ref)
                     .or_else(|_| self.repo.resolve_ref(&pr_info.base_ref))?;
                 let head = self.repo.resolve_ref(&pr_info.head_ref)?;
+
+                // Remember the names so the watcher can re-resolve them without
+                // asking `gh` again.
+                *self.pr_refs.borrow_mut() =
+                    Some((pr_info.base_ref.clone(), pr_info.head_ref.clone()));
 
                 // Detect stale: PR's recorded base SHA vs the fresh origin/<base> tip.
                 let stale_note = match git2::Oid::from_str(&pr_info.base_oid) {
@@ -1168,8 +1291,8 @@ impl App {
             Some((&self.viewed_state.borrow(), &self.target_key)),
         );
 
-        // Pick the initial focus row before moving file_entries into the model.
-        let initial_focus = find_initial_focus_index(&file_entries);
+        // Pick the focus row before moving file_entries into the model.
+        let initial_focus = pick_focus_index(&file_entries, keep.as_deref());
 
         let files_model = Rc::new(VecModel::from(file_entries));
         self.window.set_files(ModelRc::from(files_model));
@@ -1204,7 +1327,7 @@ impl App {
         Ok(())
     }
 
-    pub fn run(self) -> Result<()> {
+    pub fn run(self: Rc<Self>) -> Result<()> {
         self.window.run().context("Failed to run window")?;
 
         // Persist panel width on exit
@@ -1457,7 +1580,34 @@ fn format_timestamp(timestamp: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_stale_base_note;
+    use super::{format_stale_base_note, pick_focus_index};
+    use crate::FileEntry;
+
+    fn file(path: &str, viewed: bool) -> FileEntry {
+        FileEntry {
+            path: path.into(),
+            name: path.into(),
+            viewed,
+            ..Default::default()
+        }
+    }
+
+    /// A reload must put you back on the file you were reading, not on the
+    /// first unviewed file in the tree.
+    #[test]
+    fn keeps_the_file_that_was_open() {
+        let entries = [file("a.rs", false), file("b.rs", false)];
+        assert_eq!(pick_focus_index(&entries, Some("b.rs")), 1);
+    }
+
+    /// The file can leave the diff between two reloads, or a collapsed folder
+    /// can hide it. Focus then falls back to the first unviewed file.
+    #[test]
+    fn falls_back_when_the_kept_file_is_gone() {
+        let entries = [file("a.rs", true), file("b.rs", false)];
+        assert_eq!(pick_focus_index(&entries, Some("gone.rs")), 1);
+        assert_eq!(pick_focus_index(&entries, None), 1);
+    }
 
     #[test]
     fn stale_note_empty_when_up_to_date() {

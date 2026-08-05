@@ -15,6 +15,9 @@ pub struct Config {
     /// Column at which to wrap long diff lines. 0 = no wrap.
     pub line_wrap_column: i32,
     pub panel_width: f32,
+    /// Reload the diff by itself when the repository changes. Set it to false
+    /// if a reload during a rebase gets in your way; F5 still works.
+    pub auto_reload: bool,
     // Keybindings
     pub key_unified: String,
     pub key_side_by_side: String,
@@ -37,6 +40,7 @@ impl Default for Config {
             tab_width: 4,
             line_wrap_column: 100,
             panel_width: 280.0,
+            auto_reload: true,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_flowing: "f".to_string(),
@@ -129,6 +133,9 @@ mod tests {
         assert_eq!(config.key_collapse_context, "-");
         // The flowing-view binding is newer still; upgraders must inherit it too.
         assert_eq!(config.key_flowing, "f");
+        // Same reasoning for the watcher: an upgrader must get it switched on,
+        // not switched off by a missing key.
+        assert!(config.auto_reload);
     }
 
     #[test]
@@ -139,6 +146,7 @@ mod tests {
             tab_width: 2,
             line_wrap_column: 120,
             panel_width: 300.0,
+            auto_reload: false,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_flowing: "f".to_string(),
