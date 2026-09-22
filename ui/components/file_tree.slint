@@ -248,7 +248,7 @@ export component FileTree inherits Rectangle {
         // File list
         Flickable {
             vertical-stretch: 1;
-            viewport-height: files.length * 28px;
+            content-height: files.length * 28px;
 
             VerticalLayout {
                 for file[idx] in files: TreeItem {

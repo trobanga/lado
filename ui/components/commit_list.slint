@@ -124,7 +124,7 @@ export component CommitList inherits Rectangle {
             // below keeps its space no matter how long the range is.
             Flickable {
                 height: min(commits.length * root.row-pitch, root.max-list-height);
-                viewport-height: commits.length * root.row-pitch;
+                content-height: commits.length * root.row-pitch;
 
                 VerticalLayout {
                     spacing: 2px;

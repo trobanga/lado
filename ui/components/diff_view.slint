@@ -278,8 +278,8 @@ export component DiffView inherits Rectangle {
             // page-height), so drag-to-select and scroll don't fight each other.
             sel-scroll := ScrollView {
                 vertical-stretch: 1;
-                viewport-width: max(self.visible-width, sel-input.preferred-width + 16px);
-                viewport-height: max(self.visible-height, sel-input.preferred-height + 8px);
+                content-width: max(self.visible-width, sel-input.preferred-width + 16px);
+                content-height: max(self.visible-height, sel-input.preferred-height + 8px);
 
                 sel-input := TextInput {
                     x: 8px;

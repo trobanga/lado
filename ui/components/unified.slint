@@ -252,8 +252,8 @@ export component UnifiedView inherits Rectangle {
     flickable := Flickable {
         width: 100%;
         height: 100%;
-        viewport-width: max(self.width, 2000px);
-        viewport-y <=> root.internal-viewport-y;
+        content-width: max(self.width, 2000px);
+        content-y <=> root.internal-viewport-y;
 
         VerticalLayout {
             for line in lines: LineItem {
@@ -264,7 +264,7 @@ export component UnifiedView inherits Rectangle {
                 new-gutter-w: root.new-gutter-w;
                 width: parent.width;
                 context-expandable: root.context-expandable;
-                hint-right: -flickable.viewport-x + flickable.width - 12px;
+                hint-right: -flickable.content-x + flickable.width - 12px;
                 expand-context => { root.expand-context(); }
             }
         }
