@@ -8,6 +8,7 @@ mod git;
 mod github;
 mod highlighting;
 mod models;
+mod segments;
 mod ui;
 mod viewed_state;
 mod watcher;

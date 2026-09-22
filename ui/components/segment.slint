@@ -1,0 +1,104 @@
+// Per-change-segment "viewed" controls, shared by the unified, side-by-side and
+// flowing views.
+//
+// A change segment is one maximal run of removed and added lines — the unit a
+// reviewer marks as read. Rust tags every row with the index of the segment it
+// belongs to, and replaces a marked segment's rows with one "seg-bar" row, so
+// both controls here are just two renderings of the same tagged row:
+//
+//   SegmentToggle — overlays the first row of an un-collapsed segment and
+//                   offers to collapse it. Modelled on the hunk expander, so
+//                   the diff stays quiet until the pointer is over a segment.
+//   SegmentBar    — the collapsed stand-in. Clicking it expands the segment
+//                   again and clears its mark.
+
+import { ThemeColors } from "../theme.slint";
+import { DiffLine } from "../structs.slint";
+
+// Hover affordance on the first row of a segment that is not collapsed.
+export component SegmentToggle inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <DiffLine> line;
+    // Viewport-relative right edge. Rows are as wide as the horizontally
+    // scrollable viewport, so anchoring to the row would park the label far
+    // off-screen; this keeps it against the visible edge as the view scrolls.
+    in property <length> hint-right: 0;
+    callback toggle();
+
+    width: 100%;
+    height: 100%;
+    background: touch.has-hover ? theme.accent-primary.with-alpha(0.12) : transparent;
+
+    Text {
+        x: root.hint-right - self.width;
+        text: "✓ viewed";
+        color: touch.has-hover ? theme.accent-primary : theme.text-muted;
+        font-size: 11px;
+        vertical-alignment: center;
+        height: 100%;
+        // Only announce itself under the pointer: a persistent mark on every
+        // change block would compete with the code for attention.
+        opacity: touch.has-hover ? 1.0 : 0.0;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggle(); }
+    }
+}
+
+// The one-line stand-in for a segment the reviewer has marked as viewed.
+export component SegmentBar inherits Rectangle {
+    in property <ThemeColors> theme;
+    in property <DiffLine> line;
+    in property <length> font-size: 13px;
+    callback toggle();
+
+    background: touch.has-hover
+        ? theme.status-added.with-alpha(0.16)
+        : theme.status-added.with-alpha(0.08);
+    clip: true;
+
+    // Left edge marker, so a collapsed segment reads as a change even at a
+    // glance down the gutter.
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: 100%;
+        background: theme.status-added;
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: "▸";
+            color: theme.status-added;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "+" + root.line.segment-additions + " −" + root.line.segment-deletions;
+            color: theme.status-added;
+            font-size: 11px;
+            font-family: "monospace";
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "viewed";
+            color: touch.has-hover ? theme.accent-primary : theme.text-muted;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggle(); }
+    }
+}

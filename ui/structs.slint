@@ -38,7 +38,7 @@ export struct Ribbon {
 }
 
 export struct DiffLine {
-    line-type: string,      // "add", "remove", "context", "hunk", "comment"
+    line-type: string,      // "add", "remove", "context", "hunk", "comment", "seg-bar"
     old-line-num: string,
     new-line-num: string,
     content: string,
@@ -50,4 +50,11 @@ export struct DiffLine {
     comment-timestamp: string,
     comment-is-reply: bool,
     comment-side: string,   // "left" or "right"; drives one-sided rendering
+    // Change-segment fields. A change segment is one maximal run of removed and
+    // added rows, and is the unit a reviewer marks as viewed. Rust tags the rows
+    // of each segment here; the views turn the tags into a toggle.
+    segment-index: int,        // index into the file's segment list; -1 = none
+    segment-first: bool,       // first row of an un-collapsed segment: shows the toggle
+    segment-additions: int,    // rows the segment adds (for the collapsed bar)
+    segment-deletions: int,    // rows the segment removes (for the collapsed bar)
 }

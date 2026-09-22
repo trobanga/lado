@@ -38,6 +38,9 @@ export component DiffView inherits Rectangle {
     in property <bool> context-expandable: true;
 
     callback toggle-viewed();
+    // Mark one change segment viewed, or expand it again. Raised by the toggle
+    // on the segment's first row and by clicking a collapsed segment's bar.
+    callback toggle-segment-viewed(/* segment index */ int);
     // Widen the context by one rung. Raised by the header control and by
     // clicking any hunk header.
     callback expand-context();
@@ -184,6 +187,7 @@ export component DiffView inherits Rectangle {
             scroll-step: root.scroll-step;
             context-expandable: root.context-expandable;
             expand-context => { root.expand-context(); }
+            toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
         }
 
         if !root.select-mode && root.view-mode == "side-by-side": SideBySideView {
@@ -197,6 +201,7 @@ export component DiffView inherits Rectangle {
             scroll-step: root.scroll-step;
             context-expandable: root.context-expandable;
             expand-context => { root.expand-context(); }
+            toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
         }
 
         if !root.select-mode && root.view-mode == "flowing": FlowingView {
@@ -218,6 +223,7 @@ export component DiffView inherits Rectangle {
             context-expandable: root.context-expandable;
             remap(v) => { root.flowing-remap(v); }
             expand-context => { root.expand-context(); }
+            toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
         }
 
         // Selectable plain-text mode

@@ -115,6 +115,10 @@ export component MainWindow inherits Window {
     // Used by the diff view header so it works even when the file is hidden
     // from the tree by a collapsed ancestor.
     callback toggle-selected-viewed();
+    // Toggle one change segment of the current file. The argument is the
+    // segment's index in that file, which every row of the segment carries.
+    // A viewed segment draws as a one-line bar; toggling it expands it again.
+    callback toggle-segment-viewed(/* segment index */ int);
     // Widen / narrow the unchanged code shown around each change in the
     // current file, one rung at a time.
     callback expand-context();
@@ -407,6 +411,9 @@ export component MainWindow inherits Window {
                     }
                     toggle-viewed => {
                         root.toggle-selected-viewed();
+                    }
+                    toggle-segment-viewed(idx) => {
+                        root.toggle-segment-viewed(idx);
                     }
                     expand-context => {
                         root.expand-context();

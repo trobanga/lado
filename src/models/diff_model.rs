@@ -94,6 +94,12 @@ impl From<DiffLineModel> for SlintDiffLine {
             comment_timestamp: model.comment_timestamp.into(),
             comment_is_reply: model.comment_is_reply,
             comment_side: model.comment_side.into(),
+            // Segment tagging happens after the whole file's rows exist, since
+            // a segment is a run across rows. Until then every row is untagged.
+            segment_index: -1,
+            segment_first: false,
+            segment_additions: 0,
+            segment_deletions: 0,
         }
     }
 }

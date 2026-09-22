@@ -33,6 +33,11 @@ pub enum RowClass {
     Remove,
     /// Review comment card anchored to one side; alignment-neutral (no ribbon).
     Comment(Side),
+    /// The one-line bar standing in for a change segment the reviewer marked as
+    /// viewed. It replaces the segment's removed *and* added rows, so it draws
+    /// on both panes at one height — still a change, so the ribbon stays and
+    /// simply shrinks to the bar.
+    CollapsedChange,
 }
 
 /// One merged visual row: its pane classification and rendered height.
@@ -99,6 +104,19 @@ pub fn build_scene(rows: &[SceneRow]) -> FlowScene {
                     }
                 }
             }
+            // A collapsed bar is one whole segment by itself: it must not merge
+            // with an adjacent run, or the bar and the ribbon would cover
+            // different rows.
+            RowClass::CollapsedChange => {
+                flush(&mut scene, &mut cur);
+                scene.left_rows.push(i);
+                scene.right_rows.push(i);
+                scene.segments.push(FlowSegment {
+                    left_h: row.height,
+                    right_h: row.height,
+                    kind: SegKind::Change,
+                });
+            }
             // A comment is alignment-neutral: it never merges with an adjacent
             // run, so flush first and emit it as its own one-sided segment that
             // pauses the opposite pane while it scrolls past.
@@ -138,6 +156,25 @@ mod tests {
     }
     fn cmt(side: Side, h: f32) -> SceneRow {
         SceneRow { class: RowClass::Comment(side), height: h }
+    }
+    fn collapsed(h: f32) -> SceneRow {
+        SceneRow { class: RowClass::CollapsedChange, height: h }
+    }
+
+    #[test]
+    fn a_collapsed_change_bar_sits_on_both_panes_and_keeps_its_ribbon() {
+        // One viewed segment, drawn as a single bar. The bar stands in for both
+        // the removed and the added rows, so it renders on both panes at the
+        // same height — but it is still a change, so the ribbon survives,
+        // shrunk to the bar (D5).
+        let scene = build_scene(&[ctx(18.0), collapsed(18.0), ctx(18.0)]);
+
+        assert_eq!(scene.left_rows, vec![0, 1, 2]);
+        assert_eq!(scene.right_rows, vec![0, 1, 2]);
+        assert_eq!(scene.segments.len(), 3);
+        assert_eq!(scene.segments[1].kind, SegKind::Change);
+        assert_eq!(scene.segments[1].left_h, 18.0);
+        assert_eq!(scene.segments[1].right_h, 18.0);
     }
 
     #[test]

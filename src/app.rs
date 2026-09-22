@@ -11,6 +11,7 @@ use crate::github::{self, FileComments};
 use crate::highlighting::Highlighter;
 use crate::Ribbon;
 use crate::models::{CommitModel, DiffLineModel, FileEntryModel, TextSpanModel};
+use crate::segments::{segments_for_file, ChangeSegment};
 use crate::viewed_state::{self, ViewedState};
 use crate::watcher::DiffWatcher;
 use crate::{CommitEntry, DiffLine, FileEntry, MainWindow};
@@ -94,6 +95,14 @@ struct DiffRenderer {
     /// view's `remap` callback is registered once but must always see the
     /// current file, so it reads this shared cell rather than a captured value.
     flow_layout: Rc<RefCell<FlowLayout>>,
+    /// Which change segments the reviewer has marked, and the key each is
+    /// stored under.
+    viewed_state: Rc<RefCell<ViewedState>>,
+    target_key: String,
+    /// The change segments of the file on screen, in the order the UI indexes
+    /// them. A toggle arrives as a segment index and needs the hash behind it,
+    /// and recomputing the split would re-read the whole file to answer.
+    segments: Rc<RefCell<Vec<ChangeSegment>>>,
 }
 
 /// One file's hunks at a wider context, tagged with what they were computed
@@ -208,13 +217,20 @@ impl DiffRenderer {
         let comments = self.pr_comments.borrow();
         let hl = self.highlighter.borrow();
         let wrap = settings.line_wrap_column.max(0) as usize;
+        // Split the file into change segments, then collapse the ones already
+        // marked. Everything downstream — both gutters, both panes and the
+        // ribbons — is built from the result, so all three views collapse
+        // together.
+        let segments = segments_of(&hunks);
         let (lines, old_digits, new_digits) = get_lines_for_file(
             &hunks,
             path,
             comments.as_ref().and_then(|c| c.get(path)),
             &hl,
             wrap,
+            &segments,
         );
+        let lines = self.collapse_viewed_segments(path, segments, lines);
 
         // Flowing view: split the merged rows into two panes + ribbons. Heights
         // must match the flowing `.slint`, which is handed these same values.
@@ -250,6 +266,32 @@ impl DiffRenderer {
         self.saturated.set(covers_whole_file);
         window.set_context_level_label(level.label(covers_whole_file).as_str().into());
         window.set_context_expandable(!covers_whole_file);
+    }
+
+    /// Remember this file's change segments for the toggle callback, and
+    /// replace every marked segment's rows with a collapsed bar.
+    fn collapse_viewed_segments(
+        &self,
+        path: &str,
+        segments: Vec<ChangeSegment>,
+        lines: Vec<DiffLine>,
+    ) -> Vec<DiffLine> {
+        let viewed: Vec<bool> = {
+            let vs = self.viewed_state.borrow();
+            segments
+                .iter()
+                .map(|s| vs.is_segment_viewed(&self.target_key, path, s.hash))
+                .collect()
+        };
+
+        let out = apply_segments(lines, &segments, &viewed);
+        *self.segments.borrow_mut() = segments;
+        out
+    }
+
+    /// The content keys of the file's change segments, in UI index order.
+    fn segment_hashes(&self) -> Vec<u64> {
+        self.segments.borrow().iter().map(|s| s.hash).collect()
     }
 
     /// Move one rung and redraw. A step that can't change the picture — past
@@ -345,16 +387,14 @@ fn build_file_entries(
                     };
                 }
             }
-            // Apply viewed state from persistence
+            // A file is viewed when every one of its change segments is; the
+            // checkbox is a readout of the segments, never a separate fact.
             if let Some((vs, tk)) = viewed_state {
                 if !f.is_folder {
                     if let Some(data) = diff_data {
-                        let hash = data
-                            .file_hunks
-                            .get(&f.path)
-                            .map(|h| viewed_state::hash_diff_content(h))
-                            .unwrap_or(0);
-                        model.viewed = vs.is_viewed(tk, &f.path, hash);
+                        let empty = Vec::new();
+                        let hunks = data.file_hunks.get(&f.path).unwrap_or(&empty);
+                        model.viewed = file_is_viewed(vs, tk, &f.path, hunks);
                     }
                 }
             }
@@ -392,12 +432,9 @@ fn is_path_viewed(
     target_key: &str,
 ) -> bool {
     let Some(data) = diff_data else { return false };
-    let hash = data
-        .file_hunks
-        .get(path)
-        .map(|h| viewed_state::hash_diff_content(h))
-        .unwrap_or(0);
-    viewed.is_viewed(target_key, path, hash)
+    let empty = Vec::new();
+    let hunks = data.file_hunks.get(path).unwrap_or(&empty);
+    file_is_viewed(viewed, target_key, path, hunks)
 }
 
 impl App {
@@ -464,6 +501,9 @@ impl App {
             file_lines: Rc::new(RefCell::new(None)),
             saturated: Rc::new(Cell::new(false)),
             flow_layout: Rc::new(RefCell::new(FlowLayout::default())),
+            viewed_state: Rc::clone(&viewed_state),
+            target_key: target_key.clone(),
+            segments: Rc::new(RefCell::new(Vec::new())),
         };
 
         let app = Rc::new(Self {
@@ -983,6 +1023,7 @@ impl App {
         let viewed_state = Rc::clone(&self.viewed_state);
         let target_key = self.target_key.clone();
         let diff_data = Rc::clone(&self.diff_data);
+        let renderer = self.renderer.clone();
         self.window.on_toggle_viewed(move |idx| {
             let window = window_weak.unwrap();
             let files = window.get_files();
@@ -993,25 +1034,17 @@ impl App {
                 }
 
                 let path = entry.path.to_string();
-                let mut vs = viewed_state.borrow_mut();
-                let tk = &target_key;
-
-                if entry.viewed {
-                    vs.set_unviewed(tk, &path);
-                } else {
+                let now_viewed = !entry.viewed;
+                {
                     let data = diff_data.borrow();
-                    let hash = data
-                        .as_ref()
-                        .and_then(|d| d.file_hunks.get(&path))
-                        .map(|h| viewed_state::hash_diff_content(h))
-                        .unwrap_or(0);
-                    vs.set_viewed(tk, &path, hash);
+                    let empty = HashMap::new();
+                    let file_hunks = data.as_ref().map_or(&empty, |d| &d.file_hunks);
+                    let mut vs = viewed_state.borrow_mut();
+                    set_file_viewed_state(&mut vs, &target_key, &path, file_hunks, now_viewed);
+                    if let Err(e) = vs.save() {
+                        eprintln!("Warning: Could not save viewed state: {}", e);
+                    }
                 }
-
-                if let Err(e) = vs.save() {
-                    eprintln!("Warning: Could not save viewed state: {}", e);
-                }
-                drop(vs);
 
                 // Toggle in the UI model directly
                 let model = files
@@ -1019,13 +1052,15 @@ impl App {
                     .downcast_ref::<VecModel<FileEntry>>()
                     .unwrap();
                 let mut updated = entry.clone();
-                updated.viewed = !entry.viewed;
+                updated.viewed = now_viewed;
                 model.set_row_data(idx as usize, updated);
 
                 // If the toggled file is the one currently displayed, keep the
-                // diff header's checkbox in sync.
+                // diff header's checkbox in sync and redraw, so every segment
+                // collapses or expands with it.
                 if window.get_selected_file().to_string() == path {
-                    window.set_selected_file_viewed(!entry.viewed);
+                    window.set_selected_file_viewed(now_viewed);
+                    renderer.render(&window, &path);
                 }
             }
         });
@@ -1036,6 +1071,7 @@ impl App {
         let viewed_state = Rc::clone(&self.viewed_state);
         let target_key = self.target_key.clone();
         let diff_data = Rc::clone(&self.diff_data);
+        let renderer = self.renderer.clone();
         self.window.on_toggle_selected_viewed(move || {
             let window = window_weak.unwrap();
             let path = window.get_selected_file().to_string();
@@ -1047,16 +1083,9 @@ impl App {
             let data_borrow = diff_data.borrow();
             let was_viewed = is_path_viewed(&path, &vs, data_borrow.as_ref(), &target_key);
 
-            if was_viewed {
-                vs.set_unviewed(&target_key, &path);
-            } else {
-                let hash = data_borrow
-                    .as_ref()
-                    .and_then(|d| d.file_hunks.get(&path))
-                    .map(|h| viewed_state::hash_diff_content(h))
-                    .unwrap_or(0);
-                vs.set_viewed(&target_key, &path, hash);
-            }
+            let empty = HashMap::new();
+            let file_hunks = data_borrow.as_ref().map_or(&empty, |d| &d.file_hunks);
+            set_file_viewed_state(&mut vs, &target_key, &path, file_hunks, !was_viewed);
 
             if let Err(e) = vs.save() {
                 eprintln!("Warning: Could not save viewed state: {}", e);
@@ -1065,6 +1094,8 @@ impl App {
             drop(data_borrow);
 
             window.set_selected_file_viewed(!was_viewed);
+            // Redraw so every segment collapses or expands with the file.
+            renderer.render(&window, &path);
 
             // If the toggled file is currently visible in the tree, also update
             // the per-row entry so its checkbox reflects the new state.
@@ -1078,6 +1109,51 @@ impl App {
                             model.set_row_data(i, updated);
                             break;
                         }
+                    }
+                }
+            }
+        });
+
+        // Toggle one change segment of the current file. The view reports the
+        // segment's index; the hash behind it comes from the split the last
+        // render remembered, so the two cannot disagree.
+        let window_weak = self.window.as_weak();
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
+        let diff_data = Rc::clone(&self.diff_data);
+        let renderer = self.renderer.clone();
+        self.window.on_toggle_segment_viewed(move |idx| {
+            let window = window_weak.unwrap();
+            let path = window.get_selected_file().to_string();
+            let Ok(index) = usize::try_from(idx) else { return };
+            let Some(&hash) = renderer.segment_hashes().get(index) else {
+                return;
+            };
+
+            let file_viewed = {
+                let mut vs = viewed_state.borrow_mut();
+                toggle_segment_mark(&mut vs, &target_key, &path, hash);
+                if let Err(e) = vs.save() {
+                    eprintln!("Warning: Could not save viewed state: {}", e);
+                }
+                is_path_viewed(&path, &vs, diff_data.borrow().as_ref(), &target_key)
+            };
+
+            // Redraw the file so the segment collapses or expands.
+            renderer.render(&window, &path);
+
+            // The file is viewed exactly when all of its segments are, so the
+            // checkbox follows the segment that just moved.
+            window.set_selected_file_viewed(file_viewed);
+            let files = window.get_files();
+            if let Some(model) = files.as_any().downcast_ref::<VecModel<FileEntry>>() {
+                for i in 0..model.row_count() {
+                    let Some(entry) = model.row_data(i) else { continue };
+                    if entry.path == path {
+                        let mut updated = entry.clone();
+                        updated.viewed = file_viewed;
+                        model.set_row_data(i, updated);
+                        break;
                     }
                 }
             }
@@ -1277,6 +1353,21 @@ impl App {
         let mut diff_data = self.repo.diff_commits(base_oid, head_oid)?;
         diff_data.expand_tabs(self.window.get_app_settings().tab_width as usize);
 
+        // Promote any marks written before segment-level viewing, before
+        // anything reads the segment store.
+        {
+            let mut vs = self.viewed_state.borrow_mut();
+            migrate_legacy_marks(
+                &mut vs,
+                &self.target_key,
+                diff_data.files.iter().map(|f| f.path.as_str()),
+                &diff_data.file_hunks,
+            );
+            if let Err(e) = vs.save() {
+                eprintln!("Warning: Could not save viewed state: {}", e);
+            }
+        }
+
         // Build hierarchical file tree and flatten for UI
         let tree = build_file_tree(&diff_data.files);
         set_diff_summary(&self.window, &diff_data);
@@ -1359,27 +1450,23 @@ fn get_lines_for_file(
     file_comments: Option<&Vec<github::PrComment>>,
     highlighter: &Highlighter,
     wrap_column: usize,
+    segments: &[ChangeSegment],
 ) -> (Vec<DiffLine>, i32, i32) {
     use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
     use crate::models::{parse_hex_color, wrap_diff_line};
 
     // First, collect all diff lines with their line numbers
-    let diff_lines: Vec<GitDiffLine> = hunks
-        .iter()
-        .cloned()
-        .flat_map(|hunk| {
-            // Create hunk header line (trim trailing newline from git2)
-            let header_line = GitDiffLine {
-                line_type: DiffLineType::Hunk,
-                old_line_num: None,
-                new_line_num: None,
-                content: hunk.header.trim_end().to_string(),
-                comment: None,
-            };
-            // Prepend header to hunk lines
-            std::iter::once(header_line).chain(hunk.lines)
-        })
-        .collect();
+    let diff_lines: Vec<GitDiffLine> = flatten_hunk_lines(hunks);
+
+    // `segments` indexes into `diff_lines`. Inverting it once gives every
+    // rendered row its segment in one lookup, including the extra rows that
+    // wrapping produces from a single long line.
+    let mut segment_of: Vec<i32> = vec![-1; diff_lines.len()];
+    for (i, seg) in segments.iter().enumerate() {
+        for slot in segment_of.iter_mut().take(seg.end).skip(seg.start) {
+            *slot = i as i32;
+        }
+    }
 
     // Widest old/new line number → gutter digit count (0 = column has none).
     let old_gutter_digits = diff_lines
@@ -1423,7 +1510,7 @@ fn get_lines_for_file(
     // Build the final lines, interleaving comments
     let mut result: Vec<DiffLine> = Vec::new();
 
-    for diff_line in &diff_lines {
+    for (i, diff_line) in diff_lines.iter().enumerate() {
         // Convert to model
         let mut model = DiffLineModel::from(diff_line);
 
@@ -1443,7 +1530,9 @@ fn get_lines_for_file(
 
         // Wrap long lines into multiple visual rows (no-op when wrap_column == 0)
         for wrapped in wrap_diff_line(model, wrap_column) {
-            result.push(wrapped.into());
+            let mut line: DiffLine = wrapped.into();
+            line.segment_index = segment_of[i];
+            result.push(line);
         }
 
         // Check if there are comments for this line
@@ -1489,6 +1578,227 @@ fn get_lines_for_file(
     (result, old_gutter_digits, new_gutter_digits)
 }
 
+/// The file's hunks as one line stream, each hunk's header first.
+///
+/// This is the sequence a change segment is defined over, and the sequence
+/// `get_lines_for_file` renders, so an index into it means the same thing to
+/// both.
+fn flatten_hunk_lines(hunks: &[DiffHunk]) -> Vec<crate::git::DiffLine> {
+    use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+
+    hunks
+        .iter()
+        .cloned()
+        .flat_map(|hunk| {
+            // Hunk header line (trim the trailing newline git2 leaves on it).
+            let header = GitDiffLine {
+                line_type: DiffLineType::Hunk,
+                old_line_num: None,
+                new_line_num: None,
+                content: hunk.header.trim_end().to_string(),
+                comment: None,
+            };
+            std::iter::once(header).chain(hunk.lines)
+        })
+        .collect()
+}
+
+/// The same stream as [`flatten_hunk_lines`], classified and borrowed rather
+/// than cloned. This runs for every file in the tree on every rebuild, so it
+/// must not copy the diff to answer.
+fn hunk_line_classes(hunks: &[DiffHunk]) -> Vec<(RowClass, &str)> {
+    use crate::git::DiffLineType;
+
+    hunks
+        .iter()
+        .flat_map(|hunk| {
+            let header = std::iter::once((RowClass::Hunk, hunk.header.trim_end()));
+            header.chain(hunk.lines.iter().map(|l| {
+                let class = match l.line_type {
+                    DiffLineType::Add => RowClass::Add,
+                    DiffLineType::Remove => RowClass::Remove,
+                    DiffLineType::Hunk => RowClass::Hunk,
+                    // Comments are injected into the rendered rows later and
+                    // never appear in a hunk; Context is the only other case.
+                    _ => RowClass::Context,
+                };
+                (class, l.content.as_str())
+            }))
+        })
+        .collect()
+}
+
+/// The change segments a reviewer can mark in one file.
+///
+/// Works straight off the hunks, so it costs no highlighting and no layout —
+/// cheap enough to run for every file in the tree on every rebuild.
+fn segments_of(hunks: &[DiffHunk]) -> Vec<ChangeSegment> {
+    let classes = hunk_line_classes(hunks);
+    segments_for_file(&classes, viewed_state::hash_diff_content(hunks))
+}
+
+/// Apply a file-level viewed toggle.
+///
+/// The file checkbox is a bulk operation on the file's change segments (D4):
+/// checking it marks every one, unchecking it clears every one. There is no
+/// separate per-file fact to keep in step.
+fn set_file_viewed_state(
+    state: &mut ViewedState,
+    target_key: &str,
+    path: &str,
+    file_hunks: &HashMap<String, Vec<DiffHunk>>,
+    viewed: bool,
+) {
+    if !viewed {
+        state.set_file_unviewed(target_key, path);
+        return;
+    }
+    let empty = Vec::new();
+    let hunks = file_hunks.get(path).unwrap_or(&empty);
+    let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+    state.set_file_viewed(target_key, path, &hashes);
+}
+
+/// Flip one change segment's mark. Returns whether it is now viewed.
+///
+/// Extracted from the Slint callback so the decision — mark if unmarked, clear
+/// if marked — is testable on its own rather than only through the UI.
+fn toggle_segment_mark(
+    state: &mut ViewedState,
+    target_key: &str,
+    path: &str,
+    hash: u64,
+) -> bool {
+    if state.is_segment_viewed(target_key, path, hash) {
+        state.set_segment_unviewed(target_key, path, hash);
+        false
+    } else {
+        state.set_segment_viewed(target_key, path, hash);
+        true
+    }
+}
+
+/// Promote every legacy per-file mark in this diff to segment marks.
+///
+/// Runs once when a diff loads, before the file tree is built. Migrating
+/// lazily, as each file is opened, would be cheaper but wrong: the tree's
+/// checkboxes are derived from the segment store, so an un-migrated file would
+/// read as unviewed and a reviewer upgrading from an older version would find
+/// all of their marks apparently gone.
+/// `paths` is every file in the diff, which is not the same as the keys of
+/// `file_hunks`: a rename or a binary file appears in the diff with no hunks at
+/// all, and still has a synthetic segment to carry its mark.
+fn migrate_legacy_marks<'a>(
+    state: &mut ViewedState,
+    target_key: &str,
+    paths: impl Iterator<Item = &'a str>,
+    file_hunks: &HashMap<String, Vec<DiffHunk>>,
+) {
+    let empty = Vec::new();
+    for path in paths {
+        let hunks = file_hunks.get(path).unwrap_or(&empty);
+        let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+        state.migrate_file(
+            target_key,
+            path,
+            viewed_state::hash_diff_content(hunks),
+            &hashes,
+        );
+    }
+}
+
+/// Whether every change segment of a file has been marked as viewed.
+fn file_is_viewed(state: &ViewedState, target_key: &str, path: &str, hunks: &[DiffHunk]) -> bool {
+    let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+    state.is_file_viewed(target_key, path, &hashes)
+}
+
+/// Classify one merged row for both the segment split and the flowing view.
+///
+/// One function, so a change segment and the ribbon over it can never be drawn
+/// from two different readings of the same row (D1).
+fn row_class(row: &DiffLine) -> RowClass {
+    match row.line_type.as_str() {
+        "add" => RowClass::Add,
+        "remove" => RowClass::Remove,
+        "hunk" => RowClass::Hunk,
+        "seg-bar" => RowClass::CollapsedChange,
+        "comment" => {
+            let side = if row.comment_side.as_str() == "left" {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            RowClass::Comment(side)
+        }
+        // "context" and wrap-continuation rows (which keep their base
+        // add/remove/context type but here only context reaches this arm).
+        _ => RowClass::Context,
+    }
+}
+
+/// Tag each row with the change segment it belongs to, collapsing the segments
+/// the reviewer has already marked.
+///
+/// This is the single place the three views learn about segments. They all read
+/// the same merged row list, so substituting one bar row for a viewed segment's
+/// rows here collapses that segment in the unified view, in both panes of the
+/// side-by-side view, and — because the flowing view routes the bar to both
+/// panes — in one step in the flowing view too.
+///
+/// Each row already carries the index of the segment it came from (`-1` for a
+/// row that belongs to none, such as a review comment card). `viewed[i]` says
+/// whether `segments[i]` is marked; the two run in step.
+///
+/// A marked segment's code rows are replaced by one bar, emitted where the
+/// first of them stood. Rows that belong to no segment pass through untouched —
+/// a review comment anchored inside a change stays on screen after the code
+/// around it is collapsed.
+fn apply_segments(
+    rows: Vec<DiffLine>,
+    segments: &[ChangeSegment],
+    viewed: &[bool],
+) -> Vec<DiffLine> {
+    let mut out: Vec<DiffLine> = Vec::with_capacity(rows.len());
+    let mut open: Option<i32> = None;
+    let mut barred: Vec<bool> = vec![false; segments.len()];
+
+    for mut row in rows {
+        let index = row.segment_index;
+        let Some(seg) = usize::try_from(index).ok().and_then(|i| segments.get(i)) else {
+            row.segment_first = false;
+            out.push(row);
+            continue;
+        };
+
+        if viewed.get(index as usize).copied().unwrap_or(false) {
+            // One bar per segment, however many runs its rows arrive in.
+            if !std::mem::replace(&mut barred[index as usize], true) {
+                out.push(collapsed_bar(seg, index));
+            }
+            continue;
+        }
+
+        // The toggle hangs off the segment's first row, so mark that one only.
+        row.segment_first = open != Some(index);
+        open = Some(index);
+        row.segment_additions = seg.additions as i32;
+        row.segment_deletions = seg.deletions as i32;
+        out.push(row);
+    }
+    out
+}
+
+fn collapsed_bar(seg: &ChangeSegment, index: i32) -> DiffLine {
+    DiffLine {
+        line_type: "seg-bar".into(),
+        segment_index: index,
+        segment_additions: seg.additions as i32,
+        segment_deletions: seg.deletions as i32,
+        ..Default::default()
+    }
+}
+
 /// Half-thickness of the seam an insert/delete draws across its empty pane. The
 /// full line is `2 * SEAM_HALF` logical px — sub-pixel, so it renders as a faint
 /// anti-aliased hairline (a JetBrains-style change marker); tune on-screen.
@@ -1506,21 +1816,10 @@ fn build_flow_from_rows(
     let scene_rows: Vec<SceneRow> = rows
         .iter()
         .map(|r| {
-            let (class, height) = match r.line_type.as_str() {
-                "add" => (RowClass::Add, row_h),
-                "remove" => (RowClass::Remove, row_h),
-                "hunk" => (RowClass::Hunk, row_h),
-                "comment" => {
-                    let side = if r.comment_side.as_str() == "left" {
-                        Side::Left
-                    } else {
-                        Side::Right
-                    };
-                    (RowClass::Comment(side), comment_h)
-                }
-                // "context" and wrap-continuation rows (which keep their base
-                // add/remove/context type but here only context reaches this arm).
-                _ => (RowClass::Context, row_h),
+            let class = row_class(r);
+            let height = match class {
+                RowClass::Comment(_) => comment_h,
+                _ => row_h,
             };
             SceneRow { class, height }
         })
@@ -1580,8 +1879,348 @@ fn format_timestamp(timestamp: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_stale_base_note, pick_focus_index};
+    use super::{apply_segments, format_stale_base_note, pick_focus_index};
+    use crate::segments::ChangeSegment;
+    use crate::DiffLine;
     use crate::FileEntry;
+
+    /// A rendered row, already carrying the index of the segment it came from
+    /// (`-1` for a row that belongs to none), as `get_lines_for_file` tags it.
+    fn row(line_type: &str, content: &str, segment: i32) -> DiffLine {
+        DiffLine {
+            line_type: line_type.into(),
+            content: content.into(),
+            segment_index: segment,
+            ..Default::default()
+        }
+    }
+
+    fn segment(hash: u64) -> ChangeSegment {
+        ChangeSegment { hash, start: 0, end: 0, additions: 1, deletions: 1 }
+    }
+
+    /// The rows of one file: context, a two-line edit, context.
+    fn one_edit() -> (Vec<DiffLine>, Vec<ChangeSegment>) {
+        let rows = vec![
+            row("context", "a", -1),
+            row("remove", "old", 0),
+            row("add", "new", 0),
+            row("context", "b", -1),
+        ];
+        (rows, vec![segment(7)])
+    }
+
+    #[test]
+    fn a_viewed_segment_collapses_to_one_bar_row() {
+        let (rows, segments) = one_edit();
+
+        let out = apply_segments(rows, &segments, &[true]);
+
+        // Both the removed and the added row are gone, replaced by one bar that
+        // reports what it stands for.
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[1].line_type, "seg-bar");
+        assert_eq!(out[1].segment_index, 0);
+        assert_eq!(out[1].segment_additions, 1);
+        assert_eq!(out[1].segment_deletions, 1);
+        assert_eq!(out[0].line_type, "context");
+        assert_eq!(out[2].line_type, "context");
+    }
+
+    #[test]
+    fn an_unviewed_segment_keeps_its_rows_and_marks_only_the_first() {
+        let (rows, segments) = one_edit();
+
+        let out = apply_segments(rows, &segments, &[false]);
+
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[1].line_type, "remove");
+        assert_eq!(out[2].line_type, "add");
+        // The toggle hangs off the first row of the run, once.
+        assert!(out[1].segment_first);
+        assert!(!out[2].segment_first);
+        assert_eq!(out[1].segment_index, 0);
+        assert_eq!(out[2].segment_index, 0);
+        // Context rows belong to no segment.
+        assert_eq!(out[0].segment_index, -1);
+        assert_eq!(out[3].segment_index, -1);
+    }
+
+    #[test]
+    fn collapsing_one_segment_does_not_shift_the_index_of_the_next() {
+        // The row list shrinks as segments collapse, so the index a toggle
+        // reports has to keep counting segments, not rows.
+        let rows = vec![
+            row("remove", "a1", 0),
+            row("add", "a2", 0),
+            row("context", "-", -1),
+            row("remove", "b1", 1),
+            row("add", "b2", 1),
+        ];
+
+        let out = apply_segments(rows, &[segment(1), segment(2)], &[true, false]);
+
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].line_type, "seg-bar");
+        assert_eq!(out[0].segment_index, 0);
+        assert_eq!(out[1].line_type, "context");
+        assert_eq!(out[2].line_type, "remove");
+        assert_eq!(out[2].segment_index, 1);
+        assert!(out[2].segment_first);
+        assert_eq!(out[3].segment_index, 1);
+        assert!(!out[3].segment_first);
+    }
+
+    #[test]
+    fn collapsing_a_segment_keeps_a_review_comment_anchored_inside_it() {
+        // A comment card belongs to no segment. Hiding a reviewer's comment
+        // because the code beside it was marked read would lose real content.
+        let rows = vec![
+            row("remove", "old", 0),
+            row("comment", "", -1),
+            row("add", "new", 0),
+        ];
+
+        let out = apply_segments(rows, &[segment(7)], &[true]);
+
+        // One bar for the whole segment, however many runs its rows arrive in.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].line_type, "seg-bar");
+        assert_eq!(out[1].line_type, "comment");
+    }
+
+    #[test]
+    fn the_two_hunk_flattenings_index_the_same_lines() {
+        // A segment's range indexes the stream `hunk_line_classes` produces,
+        // and `get_lines_for_file` renders the stream `flatten_hunk_lines`
+        // produces. If the two ever disagree, every segment tag lands on the
+        // wrong row and the collapse hides the wrong code.
+        use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
+
+        let line = |t: DiffLineType, c: &str| GitDiffLine {
+            line_type: t,
+            old_line_num: None,
+            new_line_num: None,
+            content: c.to_string(),
+            comment: None,
+        };
+        let hunks = vec![
+            DiffHunk {
+                header: "@@ -1,2 +1,2 @@\n".to_string(),
+                old_start: 1,
+                old_lines: 2,
+                new_start: 1,
+                new_lines: 2,
+                lines: vec![
+                    line(DiffLineType::Context, "keep"),
+                    line(DiffLineType::Remove, "old"),
+                    line(DiffLineType::Add, "new"),
+                ],
+            },
+            DiffHunk {
+                header: "@@ -9,1 +9,1 @@\n".to_string(),
+                old_start: 9,
+                old_lines: 1,
+                new_start: 9,
+                new_lines: 1,
+                lines: vec![line(DiffLineType::Add, "tail")],
+            },
+        ];
+
+        let owned = super::flatten_hunk_lines(&hunks);
+        let classes = super::hunk_line_classes(&hunks);
+
+        assert_eq!(owned.len(), classes.len());
+        for (line, (_, text)) in owned.iter().zip(&classes) {
+            assert_eq!(line.content, *text);
+        }
+    }
+
+    /// One file whose single hunk adds `text`.
+    fn hunks_adding(text: &str) -> Vec<crate::git::DiffHunk> {
+        use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
+
+        vec![DiffHunk {
+            header: "@@ -1,1 +1,1 @@\n".to_string(),
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![GitDiffLine {
+                line_type: DiffLineType::Add,
+                old_line_num: None,
+                new_line_num: Some(1),
+                content: text.to_string(),
+                comment: None,
+            }],
+        }]
+    }
+
+    #[test]
+    fn editing_a_segment_returns_it_to_unviewed() {
+        use crate::viewed_state::ViewedState;
+
+        let before = hunks_adding("added");
+        let mut state = ViewedState::default();
+        let hashes: Vec<u64> = super::segments_of(&before).into_iter().map(|s| s.hash).collect();
+        state.set_file_viewed("ref:main", "f.rs", &hashes);
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &before));
+
+        // The same segment, one character different. Its key changes, so the
+        // reviewer has to look at it again.
+        let after = hunks_adding("added!");
+
+        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &after));
+    }
+
+    #[test]
+    fn a_segment_that_only_moved_stays_viewed() {
+        use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
+        use crate::viewed_state::ViewedState;
+
+        let before = hunks_adding("added");
+        let mut state = ViewedState::default();
+        let hashes: Vec<u64> = super::segments_of(&before).into_iter().map(|s| s.hash).collect();
+        state.set_file_viewed("ref:main", "f.rs", &hashes);
+
+        // Same edit, further down the file: different line numbers, different
+        // hunk header, identical text.
+        let mut moved: Vec<DiffHunk> = hunks_adding("added");
+        moved[0].header = "@@ -90,1 +90,1 @@\n".to_string();
+        moved[0].old_start = 90;
+        moved[0].new_start = 90;
+        moved[0].lines.insert(
+            0,
+            GitDiffLine {
+                line_type: DiffLineType::Context,
+                old_line_num: Some(90),
+                new_line_num: Some(90),
+                content: "unchanged".to_string(),
+                comment: None,
+            },
+        );
+
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &moved));
+    }
+
+    #[test]
+    fn toggling_a_segment_flips_it_in_both_directions() {
+        use crate::viewed_state::ViewedState;
+
+        let mut state = ViewedState::default();
+
+        // Unviewed -> viewed.
+        assert!(super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 7));
+        assert!(state.is_segment_viewed("ref:main", "f.rs", 7));
+
+        // Viewed -> unviewed. A7: the bar expands and the hash is gone.
+        assert!(!super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 7));
+        assert!(!state.is_segment_viewed("ref:main", "f.rs", 7));
+    }
+
+    #[test]
+    fn toggling_one_segment_leaves_its_neighbours_alone() {
+        use crate::viewed_state::ViewedState;
+
+        let mut state = ViewedState::default();
+        state.set_file_viewed("ref:main", "f.rs", &[1, 2, 3]);
+
+        super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 2);
+
+        assert!(state.is_segment_viewed("ref:main", "f.rs", 1));
+        assert!(!state.is_segment_viewed("ref:main", "f.rs", 2));
+        assert!(state.is_segment_viewed("ref:main", "f.rs", 3));
+    }
+
+    #[test]
+    fn unchecking_a_file_clears_it_and_expands_every_segment() {
+        // A8 end to end: the checkbox writes the state, the state drives
+        // `file_is_viewed`, and `apply_segments` puts the rows back.
+        use crate::viewed_state::ViewedState;
+        use std::collections::HashMap;
+
+        let hunks = hunks_adding("added");
+        let file_hunks = HashMap::from([("f.rs".to_string(), hunks.clone())]);
+        let mut state = ViewedState::default();
+
+        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", &file_hunks, true);
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &hunks));
+
+        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", &file_hunks, false);
+
+        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &hunks));
+
+        // Nothing is marked, so no row is replaced by a bar.
+        let (rows, segments) = one_edit();
+        let out = apply_segments(rows, &segments, &[false]);
+        assert!(out.iter().all(|r| r.line_type != "seg-bar"));
+    }
+
+    #[test]
+    fn widening_the_context_does_not_change_a_segments_key() {
+        // Stepping the context re-diffs the file at more surrounding lines. The
+        // change itself is untouched, so its key must not move — otherwise
+        // expanding the context would silently drop every mark in the file, and
+        // the file checkbox (which reads the un-widened hunks) would write
+        // hashes the view could never match.
+        use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+
+        let narrow = hunks_adding("added");
+
+        let mut wide = hunks_adding("added");
+        wide[0].header = "@@ -1,7 +1,8 @@\n".to_string();
+        for (offset, text) in ["ctx one", "ctx two", "ctx three"].iter().enumerate() {
+            wide[0].lines.insert(
+                offset,
+                GitDiffLine {
+                    line_type: DiffLineType::Context,
+                    old_line_num: Some(offset as u32 + 1),
+                    new_line_num: Some(offset as u32 + 1),
+                    content: text.to_string(),
+                    comment: None,
+                },
+            );
+        }
+        wide[0].lines.push(GitDiffLine {
+            line_type: DiffLineType::Context,
+            old_line_num: Some(5),
+            new_line_num: Some(6),
+            content: "ctx after".to_string(),
+            comment: None,
+        });
+
+        let keys = |h: &[crate::git::DiffHunk]| -> Vec<u64> {
+            super::segments_of(h).into_iter().map(|s| s.hash).collect()
+        };
+
+        assert_eq!(keys(&narrow), keys(&wide));
+    }
+
+    #[test]
+    fn upgrading_keeps_the_tree_checkboxes_of_files_marked_by_an_older_version() {
+        // The legacy store holds one content hash per file. Until it is
+        // promoted to segment hashes, `file_is_viewed` reports false — so
+        // without a migration at load, a reviewer's marks would all appear to
+        // vanish from the tree on the first launch after an upgrade.
+        use crate::viewed_state::{hash_diff_content, ViewedState};
+        use std::collections::HashMap;
+
+        let hunks = hunks_adding("added");
+        let file_hunks = HashMap::from([("src/app.rs".to_string(), hunks.clone())]);
+
+        // State as an older version wrote it: the whole file, one hash.
+        let mut state = ViewedState::default();
+        state.set_legacy_file_viewed_for_test("ref:main", "src/app.rs", hash_diff_content(&hunks));
+
+        super::migrate_legacy_marks(
+            &mut state,
+            "ref:main",
+            ["src/app.rs"].into_iter(),
+            &file_hunks,
+        );
+
+        assert!(super::file_is_viewed(&state, "ref:main", "src/app.rs", &hunks));
+    }
 
     fn file(path: &str, viewed: bool) -> FileEntry {
         FileEntry {

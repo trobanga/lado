@@ -14,6 +14,7 @@
 import { ThemeColors } from "../theme.slint";
 import { DiffLine, Ribbon } from "../structs.slint";
 import { SideLine, SideBySideCommentLine } from "side_by_side.slint";
+import { SegmentBar, SegmentToggle } from "segment.slint";
 
 // One rendered row on a pane: a code line (reusing SideLine) or a comment card.
 // Height comes from the shared row-height/comment-height constants so it matches
@@ -28,6 +29,7 @@ component FlowLineItem inherits Rectangle {
     in property <bool> use-old-linenum;
     in property <bool> context-expandable: true;
     callback expand-context();
+    callback toggle-segment-viewed(int);
 
     height: line.line-type == "comment" ? comment-height : row-height;
 
@@ -41,9 +43,21 @@ component FlowLineItem inherits Rectangle {
         height: 100%;
     }
 
+    // A viewed segment's bar is routed to *both* panes, at one height. That is
+    // what makes one toggle collapse the old-side and the new-side rows in a
+    // single step, and it keeps the ribbon over the segment, shrunk to the bar.
+    if root.line.line-type == "seg-bar": SegmentBar {
+        theme: root.theme;
+        line: root.line;
+        font-size: root.font-size;
+        width: 100%;
+        height: 100%;
+        toggle => { root.toggle-segment-viewed(root.line.segment-index); }
+    }
+
     SideLine {
         theme: root.theme;
-        visible: root.line.line-type != "comment";
+        visible: root.line.line-type != "comment" && root.line.line-type != "seg-bar";
         line-num: root.use-old-linenum ? root.line.old-line-num : root.line.new-line-num;
         content: root.line.content;
         line-type: root.line.line-type == "hunk" ? "context" : root.line.line-type;
@@ -76,6 +90,15 @@ component FlowLineItem inherits Rectangle {
             clicked => { root.expand-context(); }
         }
     }
+
+    // One toggle per segment, on whichever pane holds the segment's first row —
+    // the old side for a modification, the new side for a pure insertion.
+    if root.line.segment-first: SegmentToggle {
+        theme: root.theme;
+        line: root.line;
+        hint-right: root.width - 12px;
+        toggle => { root.toggle-segment-viewed(root.line.segment-index); }
+    }
 }
 
 // One clipped pane. Its content is offset by `-offset` so scrolling never moves
@@ -91,6 +114,7 @@ component FlowPane inherits Rectangle {
     in property <bool> use-old-linenum;
     in property <bool> context-expandable: true;
     callback expand-context();
+    callback toggle-segment-viewed(int);
 
     clip: true;
     background: theme.bg-primary;
@@ -108,6 +132,7 @@ component FlowPane inherits Rectangle {
             use-old-linenum: root.use-old-linenum;
             context-expandable: root.context-expandable;
             expand-context => { root.expand-context(); }
+            toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
             width: parent.width;
         }
     }
@@ -135,6 +160,7 @@ export component FlowingView inherits Rectangle {
     // Rust maps the virtual-y argument to left-y/right-y.
     callback remap(/* virtual-y */ length);
     callback expand-context();
+    callback toggle-segment-viewed(int);
 
     // Switching into this view (or its first show) must place the panes for the
     // current scroll-position; `changed` only fires on later changes.
@@ -172,6 +198,7 @@ export component FlowingView inherits Rectangle {
                 row-height: root.row-height;
                 comment-height: root.comment-height;
                 use-old-linenum: true;
+                toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
                 horizontal-stretch: 1;
             }
 
@@ -192,6 +219,7 @@ export component FlowingView inherits Rectangle {
                 use-old-linenum: false;
                 context-expandable: root.context-expandable;
                 expand-context => { root.expand-context(); }
+                toggle-segment-viewed(idx) => { root.toggle-segment-viewed(idx); }
                 horizontal-stretch: 1;
             }
         }
