@@ -114,6 +114,31 @@ impl ViewedState {
         self.set_file_viewed(target_key, file_path, hashes);
     }
 
+    /// Carry marks across a split: a mark on a whole segment that now splits at
+    /// definition boundaries becomes a mark on every piece of it.
+    ///
+    /// `pieces` pairs each piece's key with the key of its whole segment. The
+    /// whole segment's key is dropped, so un-marking one piece later sticks.
+    pub fn promote_split_marks(&mut self, target_key: &str, file_path: &str, pieces: &[(u64, u64)]) {
+        let Some(marked) = self
+            .segments
+            .get_mut(target_key)
+            .and_then(|files| files.get_mut(file_path))
+        else {
+            return;
+        };
+        let wholes: HashSet<u64> =
+            pieces.iter().map(|&(_, whole)| whole).filter(|w| marked.contains(w)).collect();
+        for &(piece, whole) in pieces {
+            if wholes.contains(&whole) {
+                marked.insert(piece);
+            }
+        }
+        for whole in wholes {
+            marked.remove(&whole);
+        }
+    }
+
     /// Drop every segment mark on a file, which is what clearing the file
     /// checkbox means (D4). Also clears the legacy entry, so a file that was
     /// only ever marked by an older version does not come back viewed.
@@ -302,5 +327,18 @@ mod tests {
         assert_eq!(target_key(&DiffTarget::DefaultBranch), "default-branch");
         assert_eq!(target_key(&DiffTarget::Ref("feature".into())), "ref:feature");
         assert_eq!(target_key(&DiffTarget::PullRequest(42)), "pr:42");
+    }
+
+    #[test]
+    fn promoting_moves_only_the_marks_of_marked_wholes() {
+        let mut state = ViewedState::default();
+        state.set_file_viewed("ref:main", "f.rs", &[100, 7]);
+
+        // Whole 100 split into 1 and 2; whole 200 (unmarked) split into 3 and 4.
+        state.promote_split_marks("ref:main", "f.rs", &[(1, 100), (2, 100), (3, 200), (4, 200)]);
+
+        let viewed = |h| state.is_segment_viewed("ref:main", "f.rs", h);
+        assert!(viewed(1) && viewed(2) && viewed(7));
+        assert!(!viewed(3) && !viewed(4) && !viewed(100));
     }
 }

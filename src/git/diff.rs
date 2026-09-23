@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::outline::FileOutlines;
+
 /// Status of a file in the diff
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
@@ -118,10 +120,15 @@ pub fn expand_tabs_in_hunks(hunks: &mut [DiffHunk], tab_width: usize) {
 }
 
 /// Complete diff data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DiffData {
     pub files: Vec<FileChange>,
     pub file_hunks: HashMap<String, Vec<DiffHunk>>,
+    /// Old and new blob of each file, zero where the file is absent.
+    pub file_blobs: HashMap<String, (git2::Oid, git2::Oid)>,
+    /// Definition outlines of each file's two blobs. Filled in by the app,
+    /// from a cache keyed on the blob ids.
+    pub file_outlines: HashMap<String, FileOutlines>,
 }
 
 impl DiffData {
@@ -226,6 +233,7 @@ mod tests {
                     ],
                 }],
             )]),
+            ..Default::default()
         };
 
         data.expand_tabs(4);
@@ -257,6 +265,7 @@ mod tests {
                     }],
                 }],
             )]),
+            ..Default::default()
         };
 
         data.expand_tabs(2);

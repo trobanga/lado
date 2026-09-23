@@ -11,7 +11,8 @@ use crate::github::{self, FileComments};
 use crate::highlighting::Highlighter;
 use crate::Ribbon;
 use crate::models::{CommitModel, DiffLineModel, FileEntryModel, TextSpanModel};
-use crate::segments::{segments_for_file, ChangeSegment};
+use crate::outline::{FileOutlines, OutlineCache};
+use crate::segments::{display_order, segments_for_file, ChangeSegment, Row};
 use crate::viewed_state::{self, ViewedState};
 use crate::watcher::DiffWatcher;
 use crate::{CommitEntry, DiffLine, FileEntry, MainWindow};
@@ -103,6 +104,8 @@ struct DiffRenderer {
     /// them. A toggle arrives as a segment index and needs the hash behind it,
     /// and recomputing the split would re-read the whole file to answer.
     segments: Rc<RefCell<Vec<ChangeSegment>>>,
+    /// Definition outlines by blob, kept across reloads and commit selections.
+    outlines: Rc<RefCell<OutlineCache>>,
 }
 
 /// One file's hunks at a wider context, tagged with what they were computed
@@ -129,6 +132,21 @@ impl DiffRenderer {
         self.head.set(Some(head));
         *self.file_lines.borrow_mut() = None;
         self.reset_level();
+    }
+
+    /// Fill in the definition outlines of every file in `data`. A side is
+    /// parsed only when the file has lines on it that a split could cut.
+    fn attach_outlines(&self, data: &mut DiffData) {
+        let mut cache = self.outlines.borrow_mut();
+        for file in &data.files {
+            let Some(&(old, new)) = data.file_blobs.get(&file.path) else { continue };
+            let ext = std::path::Path::new(&file.path).extension().and_then(|e| e.to_str()).unwrap_or("");
+            let mut side = |wanted: bool, oid: Oid| {
+                wanted.then(|| cache.get(oid, ext, || self.repo.blob_text(oid))).flatten()
+            };
+            let outlines = FileOutlines { old: side(file.deletions > 0, old), new: side(file.additions > 0, new) };
+            data.file_outlines.insert(file.path.clone(), outlines);
+        }
     }
 
     fn reset_level(&self) {
@@ -221,7 +239,10 @@ impl DiffRenderer {
         // marked. Everything downstream — both gutters, both panes and the
         // ribbons — is built from the result, so all three views collapse
         // together.
-        let segments = segments_of(&hunks);
+        let segments = {
+            let data = self.diff_data.borrow();
+            segments_of(&hunks, file_parts(data.as_ref(), path).1)
+        };
         let (lines, old_digits, new_digits) = get_lines_for_file(
             &hunks,
             path,
@@ -390,12 +411,9 @@ fn build_file_entries(
             // A file is viewed when every one of its change segments is; the
             // checkbox is a readout of the segments, never a separate fact.
             if let Some((vs, tk)) = viewed_state {
-                if !f.is_folder {
-                    if let Some(data) = diff_data {
-                        let empty = Vec::new();
-                        let hunks = data.file_hunks.get(&f.path).unwrap_or(&empty);
-                        model.viewed = file_is_viewed(vs, tk, &f.path, hunks);
-                    }
+                if !f.is_folder && diff_data.is_some() {
+                    let (hunks, outlines) = file_parts(diff_data, &f.path);
+                    model.viewed = file_is_viewed(vs, tk, &f.path, hunks, outlines);
                 }
             }
             model.into()
@@ -431,10 +449,11 @@ fn is_path_viewed(
     diff_data: Option<&DiffData>,
     target_key: &str,
 ) -> bool {
-    let Some(data) = diff_data else { return false };
-    let empty = Vec::new();
-    let hunks = data.file_hunks.get(path).unwrap_or(&empty);
-    file_is_viewed(viewed, target_key, path, hunks)
+    if diff_data.is_none() {
+        return false;
+    }
+    let (hunks, outlines) = file_parts(diff_data, path);
+    file_is_viewed(viewed, target_key, path, hunks, outlines)
 }
 
 impl App {
@@ -504,6 +523,7 @@ impl App {
             viewed_state: Rc::clone(&viewed_state),
             target_key: target_key.clone(),
             segments: Rc::new(RefCell::new(Vec::new())),
+            outlines: Rc::new(RefCell::new(OutlineCache::default())),
         };
 
         let app = Rc::new(Self {
@@ -745,6 +765,7 @@ impl App {
 
             if let Some((Ok(mut diff_data), grouped_comments)) = diff_result {
                 diff_data.expand_tabs(window.get_app_settings().tab_width as usize);
+                renderer_for_commit.attach_outlines(&mut diff_data);
                 // Publish before rendering: every later interaction (selecting
                 // another file, widening the context) reads this shared state,
                 // and leaving it on the previous diff is what made the tree and
@@ -1037,10 +1058,8 @@ impl App {
                 let now_viewed = !entry.viewed;
                 {
                     let data = diff_data.borrow();
-                    let empty = HashMap::new();
-                    let file_hunks = data.as_ref().map_or(&empty, |d| &d.file_hunks);
                     let mut vs = viewed_state.borrow_mut();
-                    set_file_viewed_state(&mut vs, &target_key, &path, file_hunks, now_viewed);
+                    set_file_viewed_state(&mut vs, &target_key, &path, data.as_ref(), now_viewed);
                     if let Err(e) = vs.save() {
                         eprintln!("Warning: Could not save viewed state: {}", e);
                     }
@@ -1083,9 +1102,7 @@ impl App {
             let data_borrow = diff_data.borrow();
             let was_viewed = is_path_viewed(&path, &vs, data_borrow.as_ref(), &target_key);
 
-            let empty = HashMap::new();
-            let file_hunks = data_borrow.as_ref().map_or(&empty, |d| &d.file_hunks);
-            set_file_viewed_state(&mut vs, &target_key, &path, file_hunks, !was_viewed);
+            set_file_viewed_state(&mut vs, &target_key, &path, data_borrow.as_ref(), !was_viewed);
 
             if let Err(e) = vs.save() {
                 eprintln!("Warning: Could not save viewed state: {}", e);
@@ -1352,6 +1369,7 @@ impl App {
         // Compute the diff
         let mut diff_data = self.repo.diff_commits(base_oid, head_oid)?;
         diff_data.expand_tabs(self.window.get_app_settings().tab_width as usize);
+        self.renderer.attach_outlines(&mut diff_data);
 
         // Promote any marks written before segment-level viewing, before
         // anything reads the segment store.
@@ -1361,7 +1379,7 @@ impl App {
                 &mut vs,
                 &self.target_key,
                 diff_data.files.iter().map(|f| f.path.as_str()),
-                &diff_data.file_hunks,
+                &diff_data,
             );
             if let Err(e) = vs.save() {
                 eprintln!("Warning: Could not save viewed state: {}", e);
@@ -1452,7 +1470,7 @@ fn get_lines_for_file(
     wrap_column: usize,
     segments: &[ChangeSegment],
 ) -> (Vec<DiffLine>, i32, i32) {
-    use crate::git::{CommentData, DiffLine as GitDiffLine, DiffLineType};
+    use crate::git::{DiffLine as GitDiffLine, DiffLineType};
     use crate::models::{parse_hex_color, wrap_diff_line};
 
     // First, collect all diff lines with their line numbers
@@ -1463,8 +1481,8 @@ fn get_lines_for_file(
     // wrapping produces from a single long line.
     let mut segment_of: Vec<i32> = vec![-1; diff_lines.len()];
     for (i, seg) in segments.iter().enumerate() {
-        for slot in segment_of.iter_mut().take(seg.end).skip(seg.start) {
-            *slot = i as i32;
+        for &row in &seg.rows {
+            segment_of[row] = i as i32;
         }
     }
 
@@ -1501,31 +1519,36 @@ fn get_lines_for_file(
         .join("\n")
         + "\n";
 
-    // Highlight the content
-    let highlighted_lines = highlighter.highlight(&full_content, path);
+    // Highlight the content in git's order, which is the order the source
+    // reads in, then map each highlighted line back to its diff line.
+    let mut highlight_iter = highlighter.highlight(&full_content, path).into_iter();
+    let mut highlights: Vec<Option<_>> = diff_lines
+        .iter()
+        .map(|l| {
+            let code = matches!(
+                l.line_type,
+                DiffLineType::Add | DiffLineType::Remove | DiffLineType::Context
+            );
+            if code { highlight_iter.next() } else { None }
+        })
+        .collect();
 
-    // Map highlighted lines back to diff lines
-    let mut highlight_iter = highlighted_lines.into_iter();
-
-    // Build the final lines, interleaving comments
+    // Build the final lines, interleaving comments. Each segment is shown as
+    // one block, so a function's removed and added lines sit together.
     let mut result: Vec<DiffLine> = Vec::new();
 
-    for (i, diff_line) in diff_lines.iter().enumerate() {
+    for i in display_order(diff_lines.len(), segments) {
+        let diff_line = &diff_lines[i];
         // Convert to model
         let mut model = DiffLineModel::from(diff_line);
 
         // Add syntax highlighting spans for code lines
-        if matches!(
-            diff_line.line_type,
-            DiffLineType::Add | DiffLineType::Remove | DiffLineType::Context
-        ) {
-            if let Some(hl_line) = highlight_iter.next() {
-                model.spans = hl_line
-                    .spans
-                    .into_iter()
-                    .map(|s| TextSpanModel::new(s.text, parse_hex_color(&s.color)))
-                    .collect();
-            }
+        if let Some(hl_line) = highlights[i].take() {
+            model.spans = hl_line
+                .spans
+                .into_iter()
+                .map(|s| TextSpanModel::new(s.text, parse_hex_color(&s.color)))
+                .collect();
         }
 
         // Wrap long lines into multiple visual rows (no-op when wrap_column == 0)
@@ -1537,45 +1560,45 @@ fn get_lines_for_file(
 
         // Check if there are comments for this line
         if let Some(comments) = file_comments {
-            // Get the appropriate line number based on comment side
-            let new_line = diff_line.new_line_num;
-            let old_line = diff_line.old_line_num;
-
-            // Find comments that target this line
-            for comment in comments {
-                let is_match = match comment.line {
-                    Some(line) => {
-                        // Match based on which side the comment is on
-                        match comment.side {
-                            github::CommentSide::Right => new_line == Some(line),
-                            github::CommentSide::Left => old_line == Some(line),
-                        }
-                    }
-                    None => false, // Skip comments without line numbers
-                };
-
-                if is_match {
-                    // Create a comment line
-                    let comment_line = GitDiffLine {
-                        line_type: DiffLineType::Comment,
-                        old_line_num: None,
-                        new_line_num: None,
-                        content: String::new(),
-                        comment: Some(CommentData {
-                            author: comment.author.clone(),
-                            body: comment.body.clone(),
-                            timestamp: format_timestamp(&comment.created_at),
-                            is_reply: comment.in_reply_to_id.is_some(),
-                            side: comment.side,
-                        }),
-                    };
-                    result.push(DiffLineModel::from(&comment_line).into());
-                }
-            }
+            result.extend(comment_rows(diff_line, comments));
         }
     }
 
     (result, old_gutter_digits, new_gutter_digits)
+}
+
+/// The comment rows to show under `line`: every comment on its line number,
+/// on the side the comment is on. A comment without a line number is skipped.
+fn comment_rows(line: &crate::git::DiffLine, comments: &[github::PrComment]) -> Vec<DiffLine> {
+    comments
+        .iter()
+        .filter(|c| comment_is_on(c, line))
+        .map(|c| DiffLineModel::from(&comment_line(c)).into())
+        .collect()
+}
+
+fn comment_is_on(comment: &github::PrComment, line: &crate::git::DiffLine) -> bool {
+    let side_line = match comment.side {
+        github::CommentSide::Right => line.new_line_num,
+        github::CommentSide::Left => line.old_line_num,
+    };
+    comment.line.is_some() && comment.line == side_line
+}
+
+fn comment_line(comment: &github::PrComment) -> crate::git::DiffLine {
+    crate::git::DiffLine {
+        line_type: crate::git::DiffLineType::Comment,
+        old_line_num: None,
+        new_line_num: None,
+        content: String::new(),
+        comment: Some(crate::git::CommentData {
+            author: comment.author.clone(),
+            body: comment.body.clone(),
+            timestamp: format_timestamp(&comment.created_at),
+            is_reply: comment.in_reply_to_id.is_some(),
+            side: comment.side,
+        }),
+    }
 }
 
 /// The file's hunks as one line stream, each hunk's header first.
@@ -1606,23 +1629,23 @@ fn flatten_hunk_lines(hunks: &[DiffHunk]) -> Vec<crate::git::DiffLine> {
 /// The same stream as [`flatten_hunk_lines`], classified and borrowed rather
 /// than cloned. This runs for every file in the tree on every rebuild, so it
 /// must not copy the diff to answer.
-fn hunk_line_classes(hunks: &[DiffHunk]) -> Vec<(RowClass, &str)> {
+fn hunk_line_classes(hunks: &[DiffHunk]) -> Vec<Row<'_>> {
     use crate::git::DiffLineType;
 
     hunks
         .iter()
         .flat_map(|hunk| {
-            let header = std::iter::once((RowClass::Hunk, hunk.header.trim_end()));
+            let header = std::iter::once((RowClass::Hunk, hunk.header.trim_end(), None));
             header.chain(hunk.lines.iter().map(|l| {
-                let class = match l.line_type {
-                    DiffLineType::Add => RowClass::Add,
-                    DiffLineType::Remove => RowClass::Remove,
-                    DiffLineType::Hunk => RowClass::Hunk,
+                let (class, line) = match l.line_type {
+                    DiffLineType::Add => (RowClass::Add, l.new_line_num),
+                    DiffLineType::Remove => (RowClass::Remove, l.old_line_num),
+                    DiffLineType::Hunk => (RowClass::Hunk, None),
                     // Comments are injected into the rendered rows later and
                     // never appear in a hunk; Context is the only other case.
-                    _ => RowClass::Context,
+                    _ => (RowClass::Context, l.new_line_num),
                 };
-                (class, l.content.as_str())
+                (class, l.content.as_str(), line)
             }))
         })
         .collect()
@@ -1632,9 +1655,20 @@ fn hunk_line_classes(hunks: &[DiffHunk]) -> Vec<(RowClass, &str)> {
 ///
 /// Works straight off the hunks, so it costs no highlighting and no layout —
 /// cheap enough to run for every file in the tree on every rebuild.
-fn segments_of(hunks: &[DiffHunk]) -> Vec<ChangeSegment> {
+fn segments_of(hunks: &[DiffHunk], outlines: &FileOutlines) -> Vec<ChangeSegment> {
     let classes = hunk_line_classes(hunks);
-    segments_for_file(&classes, viewed_state::hash_diff_content(hunks))
+    segments_for_file(&classes, outlines, viewed_state::hash_diff_content(hunks))
+}
+
+/// The hunks and the outlines of one file of `data`. Empty when the file, or
+/// the diff, is missing.
+fn file_parts<'a>(data: Option<&'a DiffData>, path: &str) -> (&'a [DiffHunk], &'a FileOutlines) {
+    static NO_OUTLINES: FileOutlines = FileOutlines { old: None, new: None };
+    let Some(data) = data else {
+        return (&[], &NO_OUTLINES);
+    };
+    let hunks = data.file_hunks.get(path).map_or(&[][..], Vec::as_slice);
+    (hunks, data.file_outlines.get(path).unwrap_or(&NO_OUTLINES))
 }
 
 /// Apply a file-level viewed toggle.
@@ -1646,16 +1680,15 @@ fn set_file_viewed_state(
     state: &mut ViewedState,
     target_key: &str,
     path: &str,
-    file_hunks: &HashMap<String, Vec<DiffHunk>>,
+    data: Option<&DiffData>,
     viewed: bool,
 ) {
     if !viewed {
         state.set_file_unviewed(target_key, path);
         return;
     }
-    let empty = Vec::new();
-    let hunks = file_hunks.get(path).unwrap_or(&empty);
-    let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+    let (hunks, outlines) = file_parts(data, path);
+    let hashes: Vec<u64> = segments_of(hunks, outlines).into_iter().map(|s| s.hash).collect();
     state.set_file_viewed(target_key, path, &hashes);
 }
 
@@ -1678,7 +1711,8 @@ fn toggle_segment_mark(
     }
 }
 
-/// Promote every legacy per-file mark in this diff to segment marks.
+/// Promote every legacy per-file mark in this diff to segment marks, and every
+/// mark on a segment that now splits at definition boundaries to its pieces.
 ///
 /// Runs once when a diff loads, before the file tree is built. Migrating
 /// lazily, as each file is opened, would be cheaper but wrong: the tree's
@@ -1692,24 +1726,33 @@ fn migrate_legacy_marks<'a>(
     state: &mut ViewedState,
     target_key: &str,
     paths: impl Iterator<Item = &'a str>,
-    file_hunks: &HashMap<String, Vec<DiffHunk>>,
+    data: &DiffData,
 ) {
-    let empty = Vec::new();
     for path in paths {
-        let hunks = file_hunks.get(path).unwrap_or(&empty);
-        let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+        let (hunks, outlines) = file_parts(Some(data), path);
+        let segments = segments_of(hunks, outlines);
+        let hashes: Vec<u64> = segments.iter().map(|s| s.hash).collect();
         state.migrate_file(
             target_key,
             path,
             viewed_state::hash_diff_content(hunks),
             &hashes,
         );
+        let pieces: Vec<(u64, u64)> =
+            segments.iter().filter_map(|s| s.parent.map(|whole| (s.hash, whole))).collect();
+        state.promote_split_marks(target_key, path, &pieces);
     }
 }
 
 /// Whether every change segment of a file has been marked as viewed.
-fn file_is_viewed(state: &ViewedState, target_key: &str, path: &str, hunks: &[DiffHunk]) -> bool {
-    let hashes: Vec<u64> = segments_of(hunks).into_iter().map(|s| s.hash).collect();
+fn file_is_viewed(
+    state: &ViewedState,
+    target_key: &str,
+    path: &str,
+    hunks: &[DiffHunk],
+    outlines: &FileOutlines,
+) -> bool {
+    let hashes: Vec<u64> = segments_of(hunks, outlines).into_iter().map(|s| s.hash).collect();
     state.is_file_viewed(target_key, path, &hashes)
 }
 
@@ -1880,7 +1923,9 @@ fn format_timestamp(timestamp: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{apply_segments, format_stale_base_note, pick_focus_index};
+    use crate::git::DiffData;
     use crate::segments::ChangeSegment;
+    use std::collections::HashMap;
     use crate::DiffLine;
     use crate::FileEntry;
 
@@ -1896,7 +1941,7 @@ mod tests {
     }
 
     fn segment(hash: u64) -> ChangeSegment {
-        ChangeSegment { hash, start: 0, end: 0, additions: 1, deletions: 1 }
+        ChangeSegment { hash, rows: Vec::new(), additions: 1, deletions: 1, parent: None }
     }
 
     /// The rows of one file: context, a two-line edit, context.
@@ -2031,7 +2076,7 @@ mod tests {
         let classes = super::hunk_line_classes(&hunks);
 
         assert_eq!(owned.len(), classes.len());
-        for (line, (_, text)) in owned.iter().zip(&classes) {
+        for (line, (_, text, _)) in owned.iter().zip(&classes) {
             assert_eq!(line.content, *text);
         }
     }
@@ -2056,21 +2101,288 @@ mod tests {
         }]
     }
 
+    fn pr_comment(
+        line: Option<u32>,
+        side: crate::github::CommentSide,
+        body: &str,
+    ) -> crate::github::PrComment {
+        crate::github::PrComment {
+            id: 1,
+            in_reply_to_id: None,
+            path: "f.rs".to_string(),
+            line,
+            side,
+            body: body.to_string(),
+            author: "rev".to_string(),
+            created_at: "2024-01-15T10:30:00Z".to_string(),
+            commit_id: String::new(),
+            original_commit_id: String::new(),
+        }
+    }
+
+    /// The rows of a one-line rewrite at line 1, with `comments` on the file.
+    fn rows_with_comments(comments: Vec<crate::github::PrComment>) -> Vec<DiffLine> {
+        use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+
+        let mut hunks = hunks_adding("new");
+        hunks[0].lines.insert(
+            0,
+            GitDiffLine {
+                line_type: DiffLineType::Remove,
+                old_line_num: Some(1),
+                new_line_num: None,
+                content: "old".to_string(),
+                comment: None,
+            },
+        );
+        let segments = super::segments_of(&hunks, &Default::default());
+        super::get_lines_for_file(
+            &hunks,
+            "f.rs",
+            Some(&comments),
+            &crate::highlighting::Highlighter::new(),
+            0,
+            &segments,
+        )
+        .0
+    }
+
+    fn kinds_and_bodies(rows: &[DiffLine]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|r| (r.line_type.to_string(), r.comment_body.to_string()))
+            .collect()
+    }
+
+    fn shown(kind: &str, body: &str) -> (String, String) {
+        (kind.to_string(), body.to_string())
+    }
+
+    #[test]
+    fn a_comment_is_shown_under_the_line_it_targets_on_its_side() {
+        use crate::github::CommentSide::{Left, Right};
+
+        let rows = rows_with_comments(vec![
+            pr_comment(Some(1), Right, "on new"),
+            pr_comment(Some(1), Left, "on old"),
+        ]);
+
+        assert_eq!(
+            kinds_and_bodies(&rows),
+            [
+                shown("hunk", ""),
+                shown("remove", ""),
+                shown("comment", "on old"),
+                shown("add", ""),
+                shown("comment", "on new"),
+            ]
+        );
+        assert_eq!(rows[2].comment_timestamp, "2024-01-15 10:30");
+        assert!(!rows[2].comment_is_reply);
+    }
+
+    #[test]
+    fn a_comment_without_a_line_or_on_another_line_is_not_shown() {
+        use crate::github::CommentSide::Right;
+
+        let rows = rows_with_comments(vec![
+            pr_comment(None, Right, "file level"),
+            pr_comment(Some(7), Right, "elsewhere"),
+        ]);
+
+        assert_eq!(
+            kinds_and_bodies(&rows),
+            [shown("hunk", ""), shown("remove", ""), shown("add", "")]
+        );
+    }
+
+    /// A new Rust file that adds two functions, as hunks, with the outline of
+    /// its new blob.
+    fn two_new_functions() -> (Vec<crate::git::DiffHunk>, crate::outline::FileOutlines) {
+        use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
+
+        let source = "fn a() {\n}\n\nfn b() {\n}\n";
+        let lines = source
+            .lines()
+            .enumerate()
+            .map(|(i, text)| GitDiffLine {
+                line_type: DiffLineType::Add,
+                old_line_num: None,
+                new_line_num: Some(i as u32 + 1),
+                content: text.to_string(),
+                comment: None,
+            })
+            .collect();
+        let hunks = vec![DiffHunk {
+            header: "@@ -0,0 +1,5 @@\n".to_string(),
+            old_start: 0,
+            old_lines: 0,
+            new_start: 1,
+            new_lines: 5,
+            lines,
+        }];
+        let outlines = crate::outline::FileOutlines {
+            old: None,
+            new: crate::outline::outline(source.as_bytes(), "rs").map(std::sync::Arc::new),
+        };
+        (hunks, outlines)
+    }
+
+    #[test]
+    fn two_new_functions_get_one_segment_each() {
+        let (hunks, outlines) = two_new_functions();
+
+        assert_eq!(super::segments_of(&hunks, &outlines).len(), 2);
+    }
+
+    #[test]
+    fn a_rewrite_of_two_functions_shows_each_one_as_a_block() {
+        use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
+        use crate::outline::{outline, FileOutlines};
+        use std::sync::Arc;
+
+        let old = "fn a() {\n}\nfn b() {\n}\n";
+        let new = "fn a() {\n 1 }\nfn b() {\n 2 }\n";
+        let line = |t, old_n, new_n, c: &str| GitDiffLine {
+            line_type: t,
+            old_line_num: old_n,
+            new_line_num: new_n,
+            content: c.to_string(),
+            comment: None,
+        };
+        let mut lines: Vec<GitDiffLine> = old
+            .lines()
+            .enumerate()
+            .map(|(i, c)| line(DiffLineType::Remove, Some(i as u32 + 1), None, c))
+            .collect();
+        lines.extend(
+            new.lines()
+                .enumerate()
+                .map(|(i, c)| line(DiffLineType::Add, None, Some(i as u32 + 1), c)),
+        );
+        let hunks = vec![DiffHunk {
+            header: "@@ -1,4 +1,4 @@\n".to_string(),
+            old_start: 1,
+            old_lines: 4,
+            new_start: 1,
+            new_lines: 4,
+            lines,
+        }];
+        let outlines = FileOutlines {
+            old: outline(old.as_bytes(), "rs").map(Arc::new),
+            new: outline(new.as_bytes(), "rs").map(Arc::new),
+        };
+        let segments = super::segments_of(&hunks, &outlines);
+
+        let (rows, _, _) = super::get_lines_for_file(
+            &hunks,
+            "f.rs",
+            None,
+            &crate::highlighting::Highlighter::new(),
+            0,
+            &segments,
+        );
+
+        let shown: Vec<(String, i32)> = rows[1..]
+            .iter()
+            .map(|r| (r.line_type.to_string(), r.segment_index))
+            .collect();
+        let expected: Vec<(String, i32)> = [
+            ("remove", 0),
+            ("remove", 0),
+            ("add", 0),
+            ("add", 0),
+            ("remove", 1),
+            ("remove", 1),
+            ("add", 1),
+            ("add", 1),
+        ]
+        .iter()
+        .map(|(t, i)| (t.to_string(), *i))
+        .collect();
+        assert_eq!(shown, expected);
+    }
+
+    #[test]
+    fn a_mark_on_a_whole_segment_marks_every_piece_after_the_split() {
+        use crate::viewed_state::ViewedState;
+
+        let (hunks, outlines) = two_new_functions();
+        // As diff-yz4 stored it: one key for the whole, unsplit segment.
+        let whole = super::segments_of(&hunks, &Default::default())[0].hash;
+        let mut state = ViewedState::default();
+        state.set_segment_viewed("ref:main", "f.rs", whole);
+        let data = DiffData {
+            file_hunks: HashMap::from([("f.rs".to_string(), hunks.clone())]),
+            file_outlines: HashMap::from([("f.rs".to_string(), outlines.clone())]),
+            ..Default::default()
+        };
+
+        super::migrate_legacy_marks(&mut state, "ref:main", ["f.rs"].into_iter(), &data);
+
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &hunks, &outlines));
+        // The old key is gone, so un-marking one piece sticks.
+        assert!(!state.is_segment_viewed("ref:main", "f.rs", whole));
+    }
+
+    #[test]
+    fn marking_the_first_function_collapses_only_its_rows() {
+        let (hunks, outlines) = two_new_functions();
+        let segments = super::segments_of(&hunks, &outlines);
+        let (rows, _, _) = super::get_lines_for_file(
+            &hunks,
+            "f.rs",
+            None,
+            &crate::highlighting::Highlighter::new(),
+            0,
+            &segments,
+        );
+
+        let out = apply_segments(rows, &segments, &[true, false]);
+
+        let shown: Vec<(&str, i32)> =
+            out[1..].iter().map(|r| (r.line_type.as_str(), r.segment_index)).collect();
+        assert_eq!(shown, [("seg-bar", 0), ("add", 1), ("add", 1), ("add", 1)]);
+    }
+
+    #[test]
+    fn widening_the_context_does_not_change_a_pieces_key() {
+        use crate::git::{DiffLine as GitDiffLine, DiffLineType};
+
+        let (narrow, outlines) = two_new_functions();
+        let mut wide = narrow.clone();
+        wide[0].lines.insert(
+            0,
+            GitDiffLine {
+                line_type: DiffLineType::Context,
+                old_line_num: Some(1),
+                new_line_num: Some(1),
+                content: "// above".to_string(),
+                comment: None,
+            },
+        );
+        let keys = |h: &[crate::git::DiffHunk]| -> Vec<u64> {
+            super::segments_of(h, &outlines).into_iter().map(|s| s.hash).collect()
+        };
+
+        assert_eq!(keys(&narrow).len(), 2);
+        assert_eq!(keys(&narrow), keys(&wide));
+    }
+
     #[test]
     fn editing_a_segment_returns_it_to_unviewed() {
         use crate::viewed_state::ViewedState;
 
         let before = hunks_adding("added");
         let mut state = ViewedState::default();
-        let hashes: Vec<u64> = super::segments_of(&before).into_iter().map(|s| s.hash).collect();
+        let hashes: Vec<u64> = super::segments_of(&before, &Default::default()).into_iter().map(|s| s.hash).collect();
         state.set_file_viewed("ref:main", "f.rs", &hashes);
-        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &before));
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &before, &Default::default()));
 
         // The same segment, one character different. Its key changes, so the
         // reviewer has to look at it again.
         let after = hunks_adding("added!");
 
-        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &after));
+        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &after, &Default::default()));
     }
 
     #[test]
@@ -2080,7 +2392,7 @@ mod tests {
 
         let before = hunks_adding("added");
         let mut state = ViewedState::default();
-        let hashes: Vec<u64> = super::segments_of(&before).into_iter().map(|s| s.hash).collect();
+        let hashes: Vec<u64> = super::segments_of(&before, &Default::default()).into_iter().map(|s| s.hash).collect();
         state.set_file_viewed("ref:main", "f.rs", &hashes);
 
         // Same edit, further down the file: different line numbers, different
@@ -2100,7 +2412,7 @@ mod tests {
             },
         );
 
-        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &moved));
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &moved, &Default::default()));
     }
 
     #[test]
@@ -2140,15 +2452,18 @@ mod tests {
         use std::collections::HashMap;
 
         let hunks = hunks_adding("added");
-        let file_hunks = HashMap::from([("f.rs".to_string(), hunks.clone())]);
+        let data = DiffData {
+            file_hunks: HashMap::from([("f.rs".to_string(), hunks.clone())]),
+            ..Default::default()
+        };
         let mut state = ViewedState::default();
 
-        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", &file_hunks, true);
-        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &hunks));
+        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", Some(&data), true);
+        assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &hunks, &Default::default()));
 
-        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", &file_hunks, false);
+        super::set_file_viewed_state(&mut state, "ref:main", "f.rs", Some(&data), false);
 
-        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &hunks));
+        assert!(!super::file_is_viewed(&state, "ref:main", "f.rs", &hunks, &Default::default()));
 
         // Nothing is marked, so no row is replaced by a bar.
         let (rows, segments) = one_edit();
@@ -2190,7 +2505,7 @@ mod tests {
         });
 
         let keys = |h: &[crate::git::DiffHunk]| -> Vec<u64> {
-            super::segments_of(h).into_iter().map(|s| s.hash).collect()
+            super::segments_of(h, &Default::default()).into_iter().map(|s| s.hash).collect()
         };
 
         assert_eq!(keys(&narrow), keys(&wide));
@@ -2206,7 +2521,10 @@ mod tests {
         use std::collections::HashMap;
 
         let hunks = hunks_adding("added");
-        let file_hunks = HashMap::from([("src/app.rs".to_string(), hunks.clone())]);
+        let data = DiffData {
+            file_hunks: HashMap::from([("src/app.rs".to_string(), hunks.clone())]),
+            ..Default::default()
+        };
 
         // State as an older version wrote it: the whole file, one hash.
         let mut state = ViewedState::default();
@@ -2216,10 +2534,10 @@ mod tests {
             &mut state,
             "ref:main",
             ["src/app.rs"].into_iter(),
-            &file_hunks,
+            &data,
         );
 
-        assert!(super::file_is_viewed(&state, "ref:main", "src/app.rs", &hunks));
+        assert!(super::file_is_viewed(&state, "ref:main", "src/app.rs", &hunks, &Default::default()));
     }
 
     fn file(path: &str, viewed: bool) -> FileEntry {

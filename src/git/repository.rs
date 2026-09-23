@@ -202,6 +202,16 @@ impl Repository {
         ))
     }
 
+    /// The content of a text blob. `None` for the zero id of an absent side,
+    /// a blob that can't be read, or a binary one.
+    pub fn blob_text(&self, oid: Oid) -> Option<Vec<u8>> {
+        if oid.is_zero() {
+            return None;
+        }
+        let blob = self.repo.find_blob(oid).ok()?;
+        (!blob.is_binary()).then(|| blob.content().to_vec())
+    }
+
     fn blob_line_count(&self, oid: Oid, path: &str) -> Result<u32> {
         let tree = self
             .repo
@@ -229,21 +239,8 @@ impl Repository {
         context_lines: u32,
         pathspec: Option<&str>,
     ) -> Result<DiffData> {
-        let base_commit = self
-            .repo
-            .find_commit(base_oid)
-            .context("Failed to find base commit")?;
-        let head_commit = self
-            .repo
-            .find_commit(head_oid)
-            .context("Failed to find head commit")?;
-
-        let base_tree = base_commit
-            .tree()
-            .context("Failed to get base commit tree")?;
-        let head_tree = head_commit
-            .tree()
-            .context("Failed to get head commit tree")?;
+        let base_tree = self.commit_tree(base_oid, "base")?;
+        let head_tree = self.commit_tree(head_oid, "head")?;
 
         let mut opts = DiffOptions::new();
         opts.context_lines(context_lines);
@@ -258,6 +255,7 @@ impl Repository {
 
         // Use RefCell to allow interior mutability in closures
         let files = RefCell::new(Vec::new());
+        let file_blobs = RefCell::new(HashMap::new());
         let file_hunks: RefCell<HashMap<String, Vec<DiffHunk>>> = RefCell::new(HashMap::new());
 
         diff.foreach(
@@ -277,6 +275,9 @@ impl Repository {
                     _ => FileStatus::Modified,
                 };
 
+                file_blobs
+                    .borrow_mut()
+                    .insert(path.clone(), (delta.old_file().id(), delta.new_file().id()));
                 files.borrow_mut().push(FileChange {
                     path,
                     status,
@@ -361,7 +362,20 @@ impl Repository {
         Ok(DiffData {
             files: files.into_inner(),
             file_hunks: file_hunks.into_inner(),
+            file_blobs: file_blobs.into_inner(),
+            file_outlines: HashMap::new(),
         })
+    }
+
+    /// The tree of commit `oid`. `role` names the commit in the error.
+    fn commit_tree(&self, oid: Oid, role: &str) -> Result<git2::Tree<'_>> {
+        let commit = self
+            .repo
+            .find_commit(oid)
+            .with_context(|| format!("Failed to find {role} commit"))?;
+        commit
+            .tree()
+            .with_context(|| format!("Failed to get {role} commit tree"))
     }
 }
 
@@ -474,10 +488,86 @@ mod tests {
         (dir, Repository { repo: git }, oids[0], oids[1])
     }
 
+    /// A repo with one commit per tree, each tree given as (name, content)
+    /// pairs. Returns the commit OIDs in creation order.
+    fn repo_with_trees(trees: &[&[(&str, &str)]]) -> (TempDir, Repository, Vec<Oid>) {
+        let dir = TempDir::new().expect("create temp dir");
+        let git = Git2Repo::init(dir.path()).expect("git init");
+
+        let mut oids: Vec<Oid> = Vec::new();
+        for files in trees {
+            let mut builder = git.treebuilder(None).expect("tree builder");
+            for (name, content) in *files {
+                let blob = git.blob(content.as_bytes()).expect("write blob");
+                builder
+                    .insert(name, blob, git2::FileMode::Blob.into())
+                    .expect("insert blob");
+            }
+            let tree = git
+                .find_tree(builder.write().expect("write tree"))
+                .expect("find tree");
+            let sig = git2::Signature::now("Tester", "tester@example.com").expect("signature");
+            let parents: Vec<git2::Commit> = oids
+                .last()
+                .map(|oid| git.find_commit(*oid).expect("find parent"))
+                .into_iter()
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+            let oid = git
+                .commit(Some("HEAD"), &sig, &sig, "commit", &tree, &parent_refs)
+                .expect("commit");
+            oids.push(oid);
+        }
+
+        (dir, Repository { repo: git }, oids)
+    }
+
+    #[test]
+    fn the_diff_reports_added_deleted_and_modified_files_with_their_counts() {
+        let (_dir, repo, oids) = repo_with_trees(&[
+            &[("kept.txt", "one\n"), ("gone.txt", "old\n")],
+            &[("kept.txt", "two\n"), ("new.txt", "fresh\n")],
+        ]);
+
+        let data = repo.diff_commits(oids[0], oids[1]).unwrap();
+
+        let files: Vec<(&str, FileStatus, usize, usize)> = data
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status, f.additions, f.deletions))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("gone.txt", FileStatus::Deleted, 0, 1),
+                ("kept.txt", FileStatus::Modified, 1, 1),
+                ("new.txt", FileStatus::Added, 1, 0),
+            ]
+        );
+        let kept: Vec<DiffLineType> = data.file_hunks["kept.txt"][0]
+            .lines
+            .iter()
+            .map(|l| l.line_type)
+            .collect();
+        assert_eq!(kept, [DiffLineType::Remove, DiffLineType::Add]);
+    }
+
     fn has_line(hunks: &[DiffHunk], content: &str) -> bool {
         hunks
             .iter()
             .any(|h| h.lines.iter().any(|l| l.content == content))
+    }
+
+    #[test]
+    fn the_diff_records_each_files_blobs_and_they_read_back() {
+        let (_dir, repo, base, head) = repo_with_one_line_edited("f.txt", 3, 2);
+
+        let data = repo.diff_commits(base, head).unwrap();
+        let (old, new) = data.file_blobs["f.txt"];
+
+        assert_eq!(repo.blob_text(old).unwrap(), b"line 1\nline 2\nline 3\n");
+        assert_eq!(repo.blob_text(new).unwrap(), b"line 1\nCHANGED\nline 3\n");
+        assert_eq!(repo.blob_text(Oid::ZERO_SHA1), None);
     }
 
     #[test]
