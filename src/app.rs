@@ -354,7 +354,7 @@ fn format_stale_base_note(base_ref: &str, commits_behind: usize) -> String {
 
 /// Count comments that actually match a diff line for a given file.
 /// Only counts comments whose line number matches a line in the diff,
-/// so stale/resolved comments pointing at lines no longer in the diff are excluded.
+/// so stale comments pointing at lines no longer in the diff are excluded.
 fn count_matching_comments(
     hunks: &[crate::git::DiffHunk],
     comments: &[github::PrComment],
@@ -718,7 +718,7 @@ impl App {
                 // "All changes" - diff base to head
                 if let (Some(b), Some(h)) = (range_base.get(), range_head.get()) {
                     // Show all comments for full diff
-                    let grouped = github::group_comments_by_file(comments.clone());
+                    let grouped = github::group_unresolved_by_file(comments.clone());
                     scope = Some((b, h));
                     Some((repo.diff_commits(b, h), Some(grouped)))
                 } else {
@@ -736,7 +736,7 @@ impl App {
                             .filter(|c| c.original_commit_id == commit.sha)
                             .cloned()
                             .collect();
-                        let grouped = github::group_comments_by_file(filtered);
+                        let grouped = github::group_unresolved_by_file(filtered);
                         scope = Some((p, c));
                         Some((repo.diff_commits(p, c), Some(grouped)))
                     } else {
@@ -752,7 +752,7 @@ impl App {
                             .filter(|c| c.original_commit_id == commit.sha)
                             .cloned()
                             .collect();
-                        let grouped = github::group_comments_by_file(filtered);
+                        let grouped = github::group_unresolved_by_file(filtered);
                         scope = Some((b, c));
                         Some((repo.diff_commits(b, c), Some(grouped)))
                     } else {
@@ -1343,7 +1343,7 @@ impl App {
                 // Fetch PR comments
                 match github::get_pr_comments(*pr_num) {
                     Ok(comments) => {
-                        let grouped = github::group_comments_by_file(comments.clone());
+                        let grouped = github::group_unresolved_by_file(comments.clone());
                         *self.pr_comments.borrow_mut() = Some(grouped);
                         *self.all_pr_comments.borrow_mut() = comments;
                     }
@@ -2117,6 +2117,8 @@ mod tests {
             created_at: "2024-01-15T10:30:00Z".to_string(),
             commit_id: String::new(),
             original_commit_id: String::new(),
+            thread_id: String::new(),
+            is_resolved: false,
         }
     }
 

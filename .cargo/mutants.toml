@@ -1,0 +1,8 @@
+# Copy .git into the scratch tree: some tests (e.g. test_open_current_dir)
+# open the repository the tests run in.
+copy_vcs = true
+
+# App's methods drive the Slint MainWindow and have no unit tests; a mutant
+# there survives whatever the change was. The pure functions in app.rs are
+# free functions, not App methods, so they stay covered.
+exclude_re = ['\bApp::']
