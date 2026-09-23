@@ -227,7 +227,7 @@ impl TreeSitterHighlighter {
         let mut highlighter = Highlighter::new();
         let config = &self.configs[config_idx].config;
 
-        let events = match highlighter.highlight(config, code.as_bytes(), None, |_| None) {
+        let events = match highlighter.highlight(config, code.as_bytes(), None, None, |_| None) {
             Ok(events) => events,
             Err(_) => return fallback_plain(code, theme),
         };
