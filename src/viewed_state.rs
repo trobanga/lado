@@ -118,7 +118,8 @@ impl ViewedState {
     /// definition boundaries becomes a mark on every piece of it.
     ///
     /// `pieces` pairs each piece's key with the key of its whole segment. The
-    /// whole segment's key is dropped, so un-marking one piece later sticks.
+    /// whole segment keeps its mark, so the segment is still viewed when the
+    /// split is turned off. Un-marking a piece clears the whole's mark.
     pub fn promote_split_marks(&mut self, target_key: &str, file_path: &str, pieces: &[(u64, u64)]) {
         let Some(marked) = self
             .segments
@@ -127,15 +128,10 @@ impl ViewedState {
         else {
             return;
         };
-        let wholes: HashSet<u64> =
-            pieces.iter().map(|&(_, whole)| whole).filter(|w| marked.contains(w)).collect();
         for &(piece, whole) in pieces {
-            if wholes.contains(&whole) {
+            if marked.contains(&whole) {
                 marked.insert(piece);
             }
-        }
-        for whole in wholes {
-            marked.remove(&whole);
         }
     }
 
@@ -330,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn promoting_moves_only_the_marks_of_marked_wholes() {
+    fn promoting_copies_only_the_marks_of_marked_wholes() {
         let mut state = ViewedState::default();
         state.set_file_viewed("ref:main", "f.rs", &[100, 7]);
 
@@ -339,6 +335,9 @@ mod tests {
 
         let viewed = |h| state.is_segment_viewed("ref:main", "f.rs", h);
         assert!(viewed(1) && viewed(2) && viewed(7));
-        assert!(!viewed(3) && !viewed(4) && !viewed(100));
+        assert!(!viewed(3) && !viewed(4));
+        // The whole keeps its mark, so turning the split off again still shows
+        // the segment as viewed.
+        assert!(viewed(100));
     }
 }

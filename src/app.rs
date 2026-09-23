@@ -106,6 +106,9 @@ struct DiffRenderer {
     segments: Rc<RefCell<Vec<ChangeSegment>>>,
     /// Definition outlines by blob, kept across reloads and commit selections.
     outlines: Rc<RefCell<OutlineCache>>,
+    /// Whether change segments split at definition boundaries. Off, no file
+    /// is parsed and every segment stays whole.
+    split: Rc<Cell<bool>>,
 }
 
 /// One file's hunks at a wider context, tagged with what they were computed
@@ -135,8 +138,13 @@ impl DiffRenderer {
     }
 
     /// Fill in the definition outlines of every file in `data`. A side is
-    /// parsed only when the file has lines on it that a split could cut.
+    /// parsed only when the file has lines on it that a split could cut. With
+    /// the split off, clear them: no outline means a whole segment.
     fn attach_outlines(&self, data: &mut DiffData) {
+        if !self.split.get() {
+            data.file_outlines.clear();
+            return;
+        }
         let mut cache = self.outlines.borrow_mut();
         for file in &data.files {
             let Some(&(old, new)) = data.file_blobs.get(&file.path) else { continue };
@@ -235,9 +243,9 @@ impl DiffRenderer {
         let comments = self.pr_comments.borrow();
         let hl = self.highlighter.borrow();
         let wrap = settings.line_wrap_column.max(0) as usize;
-        // Split the file into change segments, then collapse the ones already
+        // Split the file into change segments, then flag the ones already
         // marked. Everything downstream — both gutters, both panes and the
-        // ribbons — is built from the result, so all three views collapse
+        // ribbons — is built from the result, so all three views fade them
         // together.
         let segments = {
             let data = self.diff_data.borrow();
@@ -251,7 +259,7 @@ impl DiffRenderer {
             wrap,
             &segments,
         );
-        let lines = self.collapse_viewed_segments(path, segments, lines);
+        let lines = self.flag_viewed_segments(path, segments, lines);
 
         // Flowing view: split the merged rows into two panes + ribbons. Heights
         // must match the flowing `.slint`, which is handed these same values.
@@ -290,8 +298,8 @@ impl DiffRenderer {
     }
 
     /// Remember this file's change segments for the toggle callback, and
-    /// replace every marked segment's rows with a collapsed bar.
-    fn collapse_viewed_segments(
+    /// flag the rows of every marked segment, which the views draw faded.
+    fn flag_viewed_segments(
         &self,
         path: &str,
         segments: Vec<ChangeSegment>,
@@ -308,11 +316,6 @@ impl DiffRenderer {
         let out = apply_segments(lines, &segments, &viewed);
         *self.segments.borrow_mut() = segments;
         out
-    }
-
-    /// The content keys of the file's change segments, in UI index order.
-    fn segment_hashes(&self) -> Vec<u64> {
-        self.segments.borrow().iter().map(|s| s.hash).collect()
     }
 
     /// Move one rung and redraw. A step that can't change the picture — past
@@ -480,9 +483,11 @@ impl App {
             key_next_commit: config.key_next_commit.clone().into(),
             key_expand_context: config.key_expand_context.clone().into(),
             key_collapse_context: config.key_collapse_context.clone().into(),
+            key_toggle_split: config.key_toggle_split.clone().into(),
         });
         // Apply theme from config (theme is derived from theme-name in Slint)
         window.set_theme_name(config.ui_theme.clone().into());
+        window.set_split_segments(config.split_segments);
         // Restore persisted panel width
         window.set_left_panel_width(config.panel_width);
 
@@ -524,6 +529,7 @@ impl App {
             target_key: target_key.clone(),
             segments: Rc::new(RefCell::new(Vec::new())),
             outlines: Rc::new(RefCell::new(OutlineCache::default())),
+            split: Rc::new(Cell::new(config.split_segments)),
         };
 
         let app = Rc::new(Self {
@@ -833,6 +839,7 @@ impl App {
                 key_next_commit: settings.key_next_commit.to_string(),
                 key_expand_context: settings.key_expand_context.to_string(),
                 key_collapse_context: settings.key_collapse_context.to_string(),
+                key_toggle_split: settings.key_toggle_split.to_string(),
                 // Carry over every key the settings panel does not show. Without
                 // this, saving the panel resets them to their defaults.
                 ..crate::config::load()
@@ -1076,7 +1083,7 @@ impl App {
 
                 // If the toggled file is the one currently displayed, keep the
                 // diff header's checkbox in sync and redraw, so every segment
-                // collapses or expands with it.
+                // fades or brightens with it.
                 if window.get_selected_file().to_string() == path {
                     window.set_selected_file_viewed(now_viewed);
                     renderer.render(&window, &path);
@@ -1111,7 +1118,7 @@ impl App {
             drop(data_borrow);
 
             window.set_selected_file_viewed(!was_viewed);
-            // Redraw so every segment collapses or expands with the file.
+            // Redraw so every segment fades or brightens with the file.
             renderer.render(&window, &path);
 
             // If the toggled file is currently visible in the tree, also update
@@ -1143,37 +1150,67 @@ impl App {
             let window = window_weak.unwrap();
             let path = window.get_selected_file().to_string();
             let Ok(index) = usize::try_from(idx) else { return };
-            let Some(&hash) = renderer.segment_hashes().get(index) else {
+            let Some(segment) = renderer.segments.borrow().get(index).cloned() else {
                 return;
             };
 
             let file_viewed = {
                 let mut vs = viewed_state.borrow_mut();
-                toggle_segment_mark(&mut vs, &target_key, &path, hash);
+                toggle_segment_mark(&mut vs, &target_key, &path, &segment);
                 if let Err(e) = vs.save() {
                     eprintln!("Warning: Could not save viewed state: {}", e);
                 }
                 is_path_viewed(&path, &vs, diff_data.borrow().as_ref(), &target_key)
             };
 
-            // Redraw the file so the segment collapses or expands.
+            // Redraw the file so the segment fades or brightens.
             renderer.render(&window, &path);
 
             // The file is viewed exactly when all of its segments are, so the
             // checkbox follows the segment that just moved.
             window.set_selected_file_viewed(file_viewed);
-            let files = window.get_files();
-            if let Some(model) = files.as_any().downcast_ref::<VecModel<FileEntry>>() {
-                for i in 0..model.row_count() {
-                    let Some(entry) = model.row_data(i) else { continue };
-                    if entry.path == path {
-                        let mut updated = entry.clone();
-                        updated.viewed = file_viewed;
-                        model.set_row_data(i, updated);
-                        break;
-                    }
-                }
+            set_tree_viewed(&window, |p| (p == path).then_some(file_viewed));
+        });
+
+        // Switch the split at definition boundaries. The loaded diff is
+        // re-segmented in place: a reload would re-fetch a pull request and
+        // drop a selected commit.
+        let window_weak = self.window.as_weak();
+        let viewed_state = Rc::clone(&self.viewed_state);
+        let target_key = self.target_key.clone();
+        let renderer = self.renderer.clone();
+        self.window.on_toggle_split_segments(move || {
+            let window = window_weak.unwrap();
+            let on = !renderer.split.get();
+            renderer.split.set(on);
+            window.set_split_segments(on);
+            let mut config = crate::config::load();
+            config.split_segments = on;
+            if let Err(e) = crate::config::save(&config) {
+                eprintln!("Warning: Could not save settings: {}", e);
             }
+
+            {
+                let mut diff_data = renderer.diff_data.borrow_mut();
+                let Some(data) = diff_data.as_mut() else { return };
+                renderer.attach_outlines(data);
+                let mut vs = viewed_state.borrow_mut();
+                // A whole segment marked while the split was off marks its
+                // pieces now.
+                migrate_legacy_marks(&mut vs, &target_key, data.files.iter().map(|f| f.path.as_str()), data);
+                if let Err(e) = vs.save() {
+                    eprintln!("Warning: Could not save viewed state: {}", e);
+                }
+                // A file is viewed when all of its segments are, and the
+                // segments just changed.
+                let data = &*data;
+                set_tree_viewed(&window, |p| Some(is_path_viewed(p, &vs, Some(data), &target_key)));
+                let selected = window.get_selected_file().to_string();
+                window.set_selected_file_viewed(is_path_viewed(&selected, &vs, Some(data), &target_key));
+            }
+
+            let path = window.get_selected_file().to_string();
+            renderer.render(&window, &path);
         });
 
         // Context expansion: widen / narrow the unchanged code shown around
@@ -1696,17 +1733,23 @@ fn set_file_viewed_state(
 ///
 /// Extracted from the Slint callback so the decision — mark if unmarked, clear
 /// if marked — is testable on its own rather than only through the UI.
+///
+/// Un-marking a piece of a split segment also clears the mark of the whole
+/// segment, which the split keeps for when it is turned off again.
 fn toggle_segment_mark(
     state: &mut ViewedState,
     target_key: &str,
     path: &str,
-    hash: u64,
+    segment: &ChangeSegment,
 ) -> bool {
-    if state.is_segment_viewed(target_key, path, hash) {
-        state.set_segment_unviewed(target_key, path, hash);
+    if state.is_segment_viewed(target_key, path, segment.hash) {
+        state.set_segment_unviewed(target_key, path, segment.hash);
+        if let Some(whole) = segment.parent {
+            state.set_segment_unviewed(target_key, path, whole);
+        }
         false
     } else {
-        state.set_segment_viewed(target_key, path, hash);
+        state.set_segment_viewed(target_key, path, segment.hash);
         true
     }
 }
@@ -1741,6 +1784,26 @@ fn migrate_legacy_marks<'a>(
         let pieces: Vec<(u64, u64)> =
             segments.iter().filter_map(|s| s.parent.map(|whole| (s.hash, whole))).collect();
         state.promote_split_marks(target_key, path, &pieces);
+    }
+}
+
+/// Set the viewed checkbox of each file row in the tree to what `viewed`
+/// returns for its path; a row it returns `None` for keeps its state.
+fn set_tree_viewed(window: &MainWindow, viewed: impl Fn(&str) -> Option<bool>) {
+    let files = window.get_files();
+    let Some(model) = files.as_any().downcast_ref::<VecModel<FileEntry>>() else { return };
+    for i in 0..model.row_count() {
+        let Some(mut entry) = model.row_data(i) else { continue };
+        if entry.is_folder {
+            continue;
+        }
+        match viewed(entry.path.as_str()) {
+            Some(now) if now != entry.viewed => {
+                entry.viewed = now;
+                model.set_row_data(i, entry);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1780,66 +1843,39 @@ fn row_class(row: &DiffLine) -> RowClass {
     }
 }
 
-/// Tag each row with the change segment it belongs to, collapsing the segments
-/// the reviewer has already marked.
+/// Tag each row with the change segment it belongs to, and flag the rows of the
+/// segments the reviewer has already marked.
 ///
 /// This is the single place the three views learn about segments. They all read
-/// the same merged row list, so substituting one bar row for a viewed segment's
-/// rows here collapses that segment in the unified view, in both panes of the
-/// side-by-side view, and — because the flowing view routes the bar to both
-/// panes — in one step in the flowing view too.
+/// the same merged row list, so a flag set here fades that segment in the
+/// unified view, in both panes of the side-by-side view and in the flowing view.
+/// No row is added or removed, so row and segment indices never shift.
 ///
 /// Each row already carries the index of the segment it came from (`-1` for a
 /// row that belongs to none, such as a review comment card). `viewed[i]` says
 /// whether `segments[i]` is marked; the two run in step.
-///
-/// A marked segment's code rows are replaced by one bar, emitted where the
-/// first of them stood. Rows that belong to no segment pass through untouched —
-/// a review comment anchored inside a change stays on screen after the code
-/// around it is collapsed.
 fn apply_segments(
     rows: Vec<DiffLine>,
     segments: &[ChangeSegment],
     viewed: &[bool],
 ) -> Vec<DiffLine> {
-    let mut out: Vec<DiffLine> = Vec::with_capacity(rows.len());
     let mut open: Option<i32> = None;
-    let mut barred: Vec<bool> = vec![false; segments.len()];
-
-    for mut row in rows {
-        let index = row.segment_index;
-        let Some(seg) = usize::try_from(index).ok().and_then(|i| segments.get(i)) else {
-            row.segment_first = false;
-            out.push(row);
-            continue;
-        };
-
-        if viewed.get(index as usize).copied().unwrap_or(false) {
-            // One bar per segment, however many runs its rows arrive in.
-            if !std::mem::replace(&mut barred[index as usize], true) {
-                out.push(collapsed_bar(seg, index));
-            }
-            continue;
-        }
-
-        // The toggle hangs off the segment's first row, so mark that one only.
-        row.segment_first = open != Some(index);
-        open = Some(index);
-        row.segment_additions = seg.additions as i32;
-        row.segment_deletions = seg.deletions as i32;
-        out.push(row);
-    }
-    out
-}
-
-fn collapsed_bar(seg: &ChangeSegment, index: i32) -> DiffLine {
-    DiffLine {
-        line_type: "seg-bar".into(),
-        segment_index: index,
-        segment_additions: seg.additions as i32,
-        segment_deletions: seg.deletions as i32,
-        ..Default::default()
-    }
+    rows.into_iter()
+        .map(|mut row| {
+            let index = row.segment_index;
+            let Some(seg) = usize::try_from(index).ok().and_then(|i| segments.get(i)) else {
+                row.segment_first = false;
+                return row;
+            };
+            // The toggle hangs off the segment's first row, so mark that one only.
+            row.segment_first = open != Some(index);
+            open = Some(index);
+            row.segment_viewed = viewed.get(index as usize).copied().unwrap_or(false);
+            row.segment_additions = seg.additions as i32;
+            row.segment_deletions = seg.deletions as i32;
+            row
+        })
+        .collect()
 }
 
 /// Half-thickness of the seam an insert/delete draws across its empty pane. The
@@ -1956,20 +1992,19 @@ mod tests {
     }
 
     #[test]
-    fn a_viewed_segment_collapses_to_one_bar_row() {
+    fn a_viewed_segment_keeps_its_rows_and_flags_them() {
         let (rows, segments) = one_edit();
 
         let out = apply_segments(rows, &segments, &[true]);
 
-        // Both the removed and the added row are gone, replaced by one bar that
-        // reports what it stands for.
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[1].line_type, "seg-bar");
-        assert_eq!(out[1].segment_index, 0);
-        assert_eq!(out[1].segment_additions, 1);
-        assert_eq!(out[1].segment_deletions, 1);
-        assert_eq!(out[0].line_type, "context");
-        assert_eq!(out[2].line_type, "context");
+        // The code stays on screen; the views fade the flagged rows.
+        let types: Vec<&str> = out.iter().map(|r| r.line_type.as_str()).collect();
+        assert_eq!(types, ["context", "remove", "add", "context"]);
+        let viewed: Vec<bool> = out.iter().map(|r| r.segment_viewed).collect();
+        assert_eq!(viewed, [false, true, true, false]);
+        // The toggle still hangs off the first row, to unmark the segment.
+        assert!(out[1].segment_first);
+        assert!(!out[2].segment_first);
     }
 
     #[test]
@@ -1992,9 +2027,7 @@ mod tests {
     }
 
     #[test]
-    fn collapsing_one_segment_does_not_shift_the_index_of_the_next() {
-        // The row list shrinks as segments collapse, so the index a toggle
-        // reports has to keep counting segments, not rows.
+    fn marking_one_segment_does_not_fade_the_next() {
         let rows = vec![
             row("remove", "a1", 0),
             row("add", "a2", 0),
@@ -2005,21 +2038,18 @@ mod tests {
 
         let out = apply_segments(rows, &[segment(1), segment(2)], &[true, false]);
 
-        assert_eq!(out.len(), 4);
-        assert_eq!(out[0].line_type, "seg-bar");
-        assert_eq!(out[0].segment_index, 0);
-        assert_eq!(out[1].line_type, "context");
-        assert_eq!(out[2].line_type, "remove");
-        assert_eq!(out[2].segment_index, 1);
-        assert!(out[2].segment_first);
-        assert_eq!(out[3].segment_index, 1);
-        assert!(!out[3].segment_first);
+        let tags: Vec<(i32, bool, bool)> =
+            out.iter().map(|r| (r.segment_index, r.segment_first, r.segment_viewed)).collect();
+        assert_eq!(
+            tags,
+            [(0, true, true), (0, false, true), (-1, false, false), (1, true, false), (1, false, false)]
+        );
     }
 
     #[test]
-    fn collapsing_a_segment_keeps_a_review_comment_anchored_inside_it() {
-        // A comment card belongs to no segment. Hiding a reviewer's comment
-        // because the code beside it was marked read would lose real content.
+    fn a_review_comment_inside_a_viewed_segment_is_not_faded() {
+        // A comment card belongs to no segment. A reviewer's comment is not
+        // read just because the code beside it was.
         let rows = vec![
             row("remove", "old", 0),
             row("comment", "", -1),
@@ -2028,10 +2058,8 @@ mod tests {
 
         let out = apply_segments(rows, &[segment(7)], &[true]);
 
-        // One bar for the whole segment, however many runs its rows arrive in.
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].line_type, "seg-bar");
-        assert_eq!(out[1].line_type, "comment");
+        let viewed: Vec<bool> = out.iter().map(|r| r.segment_viewed).collect();
+        assert_eq!(viewed, [true, false, true]);
     }
 
     #[test]
@@ -2039,7 +2067,7 @@ mod tests {
         // A segment's range indexes the stream `hunk_line_classes` produces,
         // and `get_lines_for_file` renders the stream `flatten_hunk_lines`
         // produces. If the two ever disagree, every segment tag lands on the
-        // wrong row and the collapse hides the wrong code.
+        // wrong row and the fade lands on the wrong code.
         use crate::git::{DiffHunk, DiffLine as GitDiffLine, DiffLineType};
 
         let line = |t: DiffLineType, c: &str| GitDiffLine {
@@ -2322,12 +2350,19 @@ mod tests {
         super::migrate_legacy_marks(&mut state, "ref:main", ["f.rs"].into_iter(), &data);
 
         assert!(super::file_is_viewed(&state, "ref:main", "f.rs", &hunks, &outlines));
-        // The old key is gone, so un-marking one piece sticks.
+        // The whole keeps its mark while every piece is viewed...
+        assert!(state.is_segment_viewed("ref:main", "f.rs", whole));
+
+        // ...and loses it with the first piece un-marked, so the segment is
+        // not shown as viewed after the split is turned off.
+        let pieces = super::segments_of(&hunks, &outlines);
+        super::toggle_segment_mark(&mut state, "ref:main", "f.rs", &pieces[0]);
         assert!(!state.is_segment_viewed("ref:main", "f.rs", whole));
+        assert!(state.is_segment_viewed("ref:main", "f.rs", pieces[1].hash));
     }
 
     #[test]
-    fn marking_the_first_function_collapses_only_its_rows() {
+    fn marking_the_first_function_fades_only_its_rows() {
         let (hunks, outlines) = two_new_functions();
         let segments = super::segments_of(&hunks, &outlines);
         let (rows, _, _) = super::get_lines_for_file(
@@ -2341,9 +2376,8 @@ mod tests {
 
         let out = apply_segments(rows, &segments, &[true, false]);
 
-        let shown: Vec<(&str, i32)> =
-            out[1..].iter().map(|r| (r.line_type.as_str(), r.segment_index)).collect();
-        assert_eq!(shown, [("seg-bar", 0), ("add", 1), ("add", 1), ("add", 1)]);
+        assert_eq!(out.len(), 6);
+        assert!(out.iter().all(|r| r.segment_viewed == (r.segment_index == 0)));
     }
 
     #[test]
@@ -2424,11 +2458,11 @@ mod tests {
         let mut state = ViewedState::default();
 
         // Unviewed -> viewed.
-        assert!(super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 7));
+        assert!(super::toggle_segment_mark(&mut state, "ref:main", "f.rs", &segment(7)));
         assert!(state.is_segment_viewed("ref:main", "f.rs", 7));
 
         // Viewed -> unviewed. A7: the bar expands and the hash is gone.
-        assert!(!super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 7));
+        assert!(!super::toggle_segment_mark(&mut state, "ref:main", "f.rs", &segment(7)));
         assert!(!state.is_segment_viewed("ref:main", "f.rs", 7));
     }
 
@@ -2439,7 +2473,7 @@ mod tests {
         let mut state = ViewedState::default();
         state.set_file_viewed("ref:main", "f.rs", &[1, 2, 3]);
 
-        super::toggle_segment_mark(&mut state, "ref:main", "f.rs", 2);
+        super::toggle_segment_mark(&mut state, "ref:main", "f.rs", &segment(2));
 
         assert!(state.is_segment_viewed("ref:main", "f.rs", 1));
         assert!(!state.is_segment_viewed("ref:main", "f.rs", 2));

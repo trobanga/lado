@@ -38,7 +38,7 @@ export struct Ribbon {
 }
 
 export struct DiffLine {
-    line-type: string,      // "add", "remove", "context", "hunk", "comment", "seg-bar"
+    line-type: string,      // "add", "remove", "context", "hunk", "comment"
     old-line-num: string,
     new-line-num: string,
     content: string,
@@ -54,7 +54,8 @@ export struct DiffLine {
     // added rows, and is the unit a reviewer marks as viewed. Rust tags the rows
     // of each segment here; the views turn the tags into a toggle.
     segment-index: int,        // index into the file's segment list; -1 = none
-    segment-first: bool,       // first row of an un-collapsed segment: shows the toggle
-    segment-additions: int,    // rows the segment adds (for the collapsed bar)
-    segment-deletions: int,    // rows the segment removes (for the collapsed bar)
+    segment-first: bool,       // first row of a segment: shows the toggle
+    segment-viewed: bool,      // the segment is marked as viewed: drawn faded
+    segment-additions: int,    // rows the segment adds
+    segment-deletions: int,    // rows the segment removes
 }

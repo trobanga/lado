@@ -14,7 +14,7 @@
 import { ThemeColors } from "../theme.slint";
 import { DiffLine, Ribbon } from "../structs.slint";
 import { SideLine, SideBySideCommentLine } from "side_by_side.slint";
-import { SegmentBar, SegmentToggle } from "segment.slint";
+import { SegmentToggle } from "segment.slint";
 
 // One rendered row on a pane: a code line (reusing SideLine) or a comment card.
 // Height comes from the shared row-height/comment-height constants so it matches
@@ -43,21 +43,10 @@ component FlowLineItem inherits Rectangle {
         height: 100%;
     }
 
-    // A viewed segment's bar is routed to *both* panes, at one height. That is
-    // what makes one toggle collapse the old-side and the new-side rows in a
-    // single step, and it keeps the ribbon over the segment, shrunk to the bar.
-    if root.line.line-type == "seg-bar": SegmentBar {
-        theme: root.theme;
-        line: root.line;
-        font-size: root.font-size;
-        width: 100%;
-        height: 100%;
-        toggle => { root.toggle-segment-viewed(root.line.segment-index); }
-    }
-
     SideLine {
         theme: root.theme;
-        visible: root.line.line-type != "comment" && root.line.line-type != "seg-bar";
+        visible: root.line.line-type != "comment";
+        faded: root.line.segment-viewed;
         line-num: root.use-old-linenum ? root.line.old-line-num : root.line.new-line-num;
         content: root.line.content;
         line-type: root.line.line-type == "hunk" ? "context" : root.line.line-type;

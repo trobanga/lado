@@ -98,6 +98,7 @@ impl From<DiffLineModel> for SlintDiffLine {
             // a segment is a run across rows. Until then every row is untagged.
             segment_index: -1,
             segment_first: false,
+            segment_viewed: false,
             segment_additions: 0,
             segment_deletions: 0,
         }

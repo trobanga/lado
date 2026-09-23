@@ -1,6 +1,6 @@
 import { ThemeColors } from "../theme.slint";
 import { DiffLine, TextSpan } from "../structs.slint";
-import { SegmentBar, SegmentToggle } from "segment.slint";
+import { Fade, SegmentToggle } from "segment.slint";
 
 export component SideBySideCommentLine inherits Rectangle {
     in property <ThemeColors> theme;
@@ -65,24 +65,26 @@ export component SideLine inherits Rectangle {
     in property <length> font-size: 13px;
     in property <bool> is-continuation: false;
     in property <length> gutter-width: 50px;
+    // The row belongs to a segment marked as viewed: drain its colours.
+    in property <bool> faded: false;
 
-    background: line-type == "add" ? theme.diff-add-bg :
+    background: Fade.tone(line-type == "add" ? theme.diff-add-bg :
                 line-type == "remove" ? theme.diff-remove-bg :
                 line-type == "empty" ? theme.bg-tertiary :
-                theme.diff-context-bg;
+                theme.diff-context-bg, root.faded);
 
     HorizontalLayout {
         // Gutter
         Rectangle {
             width: root.gutter-width;
-            background: line-type == "add" ? theme.diff-add-gutter :
+            background: Fade.tone(line-type == "add" ? theme.diff-add-gutter :
                         line-type == "remove" ? theme.diff-remove-gutter :
                         line-type == "empty" ? theme.bg-tertiary :
-                        theme.bg-secondary;
+                        theme.bg-secondary, root.faded);
 
             Text {
                 text: line-num;
-                color: theme.text-muted;
+                color: Fade.tone(theme.text-muted, root.faded);
                 font-size: 12px;
                 horizontal-alignment: right;
                 vertical-alignment: center;
@@ -100,9 +102,9 @@ export component SideLine inherits Rectangle {
                 text: root.is-continuation ? " " :
                       line-type == "add" ? "+" :
                       line-type == "remove" ? "-" : " ";
-                color: line-type == "add" ? theme.diff-add-text :
+                color: Fade.tone(line-type == "add" ? theme.diff-add-text :
                        line-type == "remove" ? theme.diff-remove-text :
-                       theme.text-muted;
+                       theme.text-muted, root.faded);
                 font-size: root.font-size;
                 font-weight: 600;
                 horizontal-alignment: center;
@@ -129,7 +131,7 @@ export component SideLine inherits Rectangle {
                 // Render syntax-highlighted spans if available
                 for span in spans: Text {
                     text: span.text;
-                    color: span.color;
+                    color: Fade.tone(span.color, root.faded);
                     font-size: root.font-size;
                     font-family: "monospace";
                 }
@@ -137,10 +139,10 @@ export component SideLine inherits Rectangle {
                 // Fallback to plain content when no spans
                 if spans.length == 0: Text {
                     text: content;
-                    color: line-type == "add" ? theme.diff-add-text :
+                    color: Fade.tone(line-type == "add" ? theme.diff-add-text :
                            line-type == "remove" ? theme.diff-remove-text :
                            line-type == "empty" ? transparent :
-                           theme.text-primary;
+                           theme.text-primary, root.faded);
                     font-size: root.font-size;
                     font-family: "monospace";
                 }
@@ -169,20 +171,10 @@ component LeftLineItem inherits Rectangle {
         height: 100%;
     }
 
-    // A viewed segment collapses on both panes at once: the bar is one row in
-    // the shared row list, so it draws at the same height on each side.
-    if root.line.line-type == "seg-bar": SegmentBar {
-        theme: root.theme;
-        line: root.line;
-        font-size: root.font-size;
-        width: 100%;
-        height: 100%;
-        toggle => { root.toggle-segment-viewed(root.line.segment-index); }
-    }
-
     SideLine {
         theme: root.theme;
-        visible: root.line.line-type != "comment" && root.line.line-type != "seg-bar";
+        visible: root.line.line-type != "comment";
+        faded: root.line.segment-viewed;
         line-num: root.line.old-line-num;
         content: root.line.line-type == "add" ? "" : root.line.content;
         line-type: root.line.line-type == "add" ? "empty" :
@@ -218,18 +210,10 @@ component RightLineItem inherits Rectangle {
         height: 100%;
     }
 
-    if root.line.line-type == "seg-bar": SegmentBar {
-        theme: root.theme;
-        line: root.line;
-        font-size: root.font-size;
-        width: 100%;
-        height: 100%;
-        toggle => { root.toggle-segment-viewed(root.line.segment-index); }
-    }
-
     SideLine {
         theme: root.theme;
-        visible: root.line.line-type != "comment" && root.line.line-type != "seg-bar";
+        visible: root.line.line-type != "comment";
+        faded: root.line.segment-viewed;
         line-num: root.line.new-line-num;
         content: root.line.line-type == "remove" ? "" : root.line.content;
         line-type: root.line.line-type == "remove" ? "empty" :

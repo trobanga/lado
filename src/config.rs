@@ -18,6 +18,10 @@ pub struct Config {
     /// Reload the diff by itself when the repository changes. Set it to false
     /// if a reload during a rebase gets in your way; F5 still works.
     pub auto_reload: bool,
+    /// Split change segments at the boundaries of top-level definitions, so
+    /// each function gets its own viewed toggle. Off by default; the
+    /// `key_toggle_split` key switches it in the app.
+    pub split_segments: bool,
     // Keybindings
     pub key_unified: String,
     pub key_side_by_side: String,
@@ -30,6 +34,7 @@ pub struct Config {
     pub key_next_commit: String,
     pub key_expand_context: String,
     pub key_collapse_context: String,
+    pub key_toggle_split: String,
 }
 
 impl Default for Config {
@@ -41,6 +46,7 @@ impl Default for Config {
             line_wrap_column: 100,
             panel_width: 280.0,
             auto_reload: true,
+            split_segments: false,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_flowing: "f".to_string(),
@@ -52,6 +58,7 @@ impl Default for Config {
             key_next_commit: "]".to_string(),
             key_expand_context: "+".to_string(),
             key_collapse_context: "-".to_string(),
+            key_toggle_split: "d".to_string(),
         }
     }
 }
@@ -136,6 +143,10 @@ mod tests {
         // Same reasoning for the watcher: an upgrader must get it switched on,
         // not switched off by a missing key.
         assert!(config.auto_reload);
+        // The split at definition boundaries is opt-in, and its key works for
+        // an upgrader without a config edit.
+        assert!(!config.split_segments);
+        assert_eq!(config.key_toggle_split, "d");
     }
 
     #[test]
@@ -147,6 +158,7 @@ mod tests {
             line_wrap_column: 120,
             panel_width: 300.0,
             auto_reload: false,
+            split_segments: true,
             key_unified: "u".to_string(),
             key_side_by_side: "s".to_string(),
             key_flowing: "f".to_string(),
@@ -158,6 +170,7 @@ mod tests {
             key_next_commit: "]".to_string(),
             key_expand_context: "+".to_string(),
             key_collapse_context: "-".to_string(),
+            key_toggle_split: "x".to_string(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();

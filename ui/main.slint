@@ -77,7 +77,11 @@ export component MainWindow inherits Window {
         key-next-commit: "]",
         key-expand-context: "+",
         key-collapse-context: "-",
+        key-toggle-split: "d",
     };
+    // Change segments split at definition boundaries, one viewed toggle per
+    // function. Switched with key-toggle-split.
+    in-out property <bool> split-segments: false;
 
     // How much unchanged code surrounds each change in the current file, e.g.
     // "±3 lines" or "whole file". Shown in the file header so stepping past the
@@ -117,12 +121,14 @@ export component MainWindow inherits Window {
     callback toggle-selected-viewed();
     // Toggle one change segment of the current file. The argument is the
     // segment's index in that file, which every row of the segment carries.
-    // A viewed segment draws as a one-line bar; toggling it expands it again.
+    // A viewed segment is drawn faded; toggling it restores its colours.
     callback toggle-segment-viewed(/* segment index */ int);
     // Widen / narrow the unchanged code shown around each change in the
     // current file, one rung at a time.
     callback expand-context();
     callback collapse-context();
+    // Switch split-segments and re-segment the loaded diff.
+    callback toggle-split-segments();
 
     init => {
         main-focus.focus();
@@ -196,6 +202,10 @@ export component MainWindow inherits Window {
             // CONTEXT EXPANSION (+ / -) - widen the code shown around changes
             if (event.text == root.app-settings.key-expand-context) {
                 root.expand-context();
+                return accept;
+            }
+            if (event.text == root.app-settings.key-toggle-split) {
+                root.toggle-split-segments();
                 return accept;
             }
             if (event.text == root.app-settings.key-collapse-context) {
@@ -397,6 +407,7 @@ export component MainWindow inherits Window {
                     selectable-text: root.selectable-text;
                     context-level-label: root.context-level-label;
                     context-expandable: root.context-expandable;
+                    split-segments: root.split-segments;
                     // Flowing view pass-through.
                     flowing-left-rows: root.flowing-left-rows;
                     flowing-right-rows: root.flowing-right-rows;
